@@ -1,86 +1,48 @@
-# app.py — Resume + Cover Letter + Instructor Pathway Packet (no AI)
+# app.py — Resume Workshop & Pathways (Seattle tri-county, union + open-shop lanes)
+# Single-file Streamlit app. No AI, no API keys. Works with your DOCX resume template.
 # Features:
-# - Trade select (+ optional auto-discovery from your apprenticeship packet)
-# - Apprenticeship vs Job mode
-# - Upload job descriptions (PDF/DOCX/TXT) → conservative bullet suggestions
-# - Resume via your DOCX template (docxtpl)
-# - Union-neutral Objective & Cover Letter (filters remove disallowed terms)
-# - Instructor Pathway Packet = FULL TEXT of selected pathway docs (no summaries)
+# - Workshop intake → resume (docxtpl) + cover letter (python-docx) + instructor packet (full-text of uploads)
+# - Trade picker (guidebook order + Lineman), Boost Plan panel per trade (certs, hold-over jobs, pipelines)
+# - JD upload parsing (PDF/DOCX/TXT), conservative text cleanup/normalization
+# - Neutral objective/letter language (no union/non-union/inside-wire/etc.)
 
 from __future__ import annotations
 import io, os, re, csv, datetime
 from dataclasses import dataclass, asdict
 from typing import List, Dict, Any
 
-import pandas as pd
 import streamlit as st
+import pandas as pd
+
 from docxtpl import DocxTemplate
-from pypdf import PdfReader
-from docx import Document as DocxWriter  # for building cover letter & pathway packet
+from docx import Document as DocxWriter
 from docx.shared import Pt
+from pypdf import PdfReader
+
+st.set_page_config(page_title="Resume Workshop & Pathways", layout="wide")
 
 # ─────────────────────────────────────────────────────────
-# Page
-# ─────────────────────────────────────────────────────────
-st.set_page_config(page_title="Resume & Cover Letter Workshop", layout="wide")
-
-# ─────────────────────────────────────────────────────────
-# One-page & content guardrails
+# Guardrails & cleanup
 # ─────────────────────────────────────────────────────────
 MAX_SUMMARY_CHARS = 450
 MAX_SKILLS = 12
-MAX_CERTS = 6
+MAX_CERTS = 8
 MAX_JOBS = 3
 MAX_BULLETS_PER_JOB = 4
 MAX_SCHOOLS = 2
 
-# Block union/non-union & sub-trade silo in objectives/letters
 BANNED_TERMS = [
     r"\bunion\b", r"\bnon[-\s]?union\b", r"\bibew\b", r"\blocal\s*\d+\b",
-    r"\binside\s+wire(man|men)?\b", r"\bresidential\b", r"\blow[-\s]?voltage\b",
-    r"\bsound\s+and\s+communication(s)?\b"
+    r"\binside\s+wire(man|men)?\b", r"\blow[-\s]?voltage\b", r"\bsound\s+and\s+communication(s)?\b"
 ]
 BANNED_RE = re.compile("|".join(BANNED_TERMS), re.I)
 
-def strip_banned(text: str) -> str:
-    return BANNED_RE.sub("", text or "").strip()
-
-# ─────────────────────────────────────────────────────────
-# Canonical skills + normalization
-# ─────────────────────────────────────────────────────────
-SKILL_CANON = [
-    "Problem-solving","Critical thinking","Attention to detail","Time management",
-    "Teamwork & collaboration","Adaptability & willingness to learn","Safety awareness",
-    "Conflict resolution","Customer service","Leadership","Reading blueprints & specs",
-    "Hand & power tools","Materials handling (wood/concrete/metal)",
-    "Operating machinery (e.g., forklifts)","Trades math & measurement",
-    "Regulatory compliance","Physical stamina & dexterity",
-]
-_SKILL_SYNONYMS = {
-    "problem solving":"Problem-solving","problem-solving":"Problem-solving",
-    "critical-thinking":"Critical thinking","attention to details":"Attention to detail",
-    "time-management":"Time management","teamwork":"Teamwork & collaboration",
-    "collaboration":"Teamwork & collaboration","adaptability":"Adaptability & willingness to learn",
-    "willingness to learn":"Adaptability & willingness to learn","safety":"Safety awareness",
-    "customer service skills":"Customer service","leadership skills":"Leadership",
-    "blueprints":"Reading blueprints & specs","tools":"Hand & power tools",
-    "machinery":"Operating machinery (e.g., forklifts)","math":"Trades math & measurement",
-    "measurements":"Trades math & measurement","compliance":"Regulatory compliance",
-    "stamina":"Physical stamina & dexterity",
-}
-def normalize_skill_label(s: str) -> str:
-    base = (s or "").strip()
-    key = re.sub(r"\s+"," ",base.lower())
-    mapped = _SKILL_SYNONYMS.get(key)
-    if mapped: return mapped
-    return re.sub(r"\s+"," ",base).strip().title()
-
-# ─────────────────────────────────────────────────────────
-# Text cleanup
-# ─────────────────────────────────────────────────────────
 FILLER_LEADS = re.compile(r"^\s*(responsible for|duties included|tasked with|in charge of)\s*:?\s*", re.I)
 MULTISPACE = re.compile(r"\s+")
 PHONE_DIGITS = re.compile(r"\D+")
+
+def strip_banned(text: str) -> str:
+    return BANNED_RE.sub("", text or "").strip()
 
 def norm_ws(s: str) -> str:
     s = (s or "").strip()
@@ -91,12 +53,9 @@ def cap_first(s: str) -> str:
     return s[:1].upper()+s[1:] if s else s
 
 def clean_bullet(s: str) -> str:
-    s = norm_ws(s)
-    s = FILLER_LEADS.sub("", s)
-    s = re.sub(r"\.+$","", s)
-    s = cap_first(s)
-    words = s.split()
-    return " ".join(words[:20]) if len(words)>20 else s
+    s = norm_ws(s); s = FILLER_LEADS.sub("", s); s = re.sub(r"\.+$","", s)
+    s = cap_first(s); words = s.split()
+    return " ".join(words[:24]) if len(words)>24 else s
 
 def clean_phone(s: str) -> str:
     digits = PHONE_DIGITS.sub("", s or "")
@@ -121,111 +80,40 @@ def parse_dates(raw: str) -> tuple[str,str]:
     return (raw,"") if raw else ("","")
 
 # ─────────────────────────────────────────────────────────
-# Trade profiles & bullet suggestions (entry-level, conservative)
+# Skills canon & synonyms (conservative)
 # ─────────────────────────────────────────────────────────
-MASTER_TRADES = [
-    "Electrician","Carpenter","Plumber","Laborer","HVAC","Concrete","Roofing",
-    "Drywall","Ironworker","Elevator Mechanic","Cement Mason","Bricklayer",
-    "Painter","Glazier","Pile Driver","Sheet Metal","Operating Engineer",
-    "Lineworker","Tree Trimmer","General"
+SKILL_CANON = [
+    "Problem-solving","Critical thinking","Attention to detail","Time management",
+    "Teamwork & collaboration","Adaptability & willingness to learn","Safety awareness",
+    "Conflict resolution","Customer service","Leadership","Reading blueprints & specs",
+    "Hand & power tools","Materials handling (wood/concrete/metal)","Operating machinery",
+    "Trades math & measurement","Regulatory compliance","Physical stamina & dexterity"
 ]
-
-TRADE_SKILL_SUGGEST = {
-    "Electrician": ["Hand & power tools","Reading blueprints & specs","Safety awareness","Trades math & measurement"],
-    "Carpenter": ["Hand & power tools","Reading blueprints & specs","Attention to detail","Materials handling (wood/concrete/metal)"],
-    "Plumber": ["Hand & power tools","Safety awareness","Trades math & measurement","Teamwork & collaboration"],
-    "Laborer": ["Materials handling (wood/concrete/metal)","Safety awareness","Operating machinery (e.g., forklifts)","Physical stamina & dexterity"],
-    "HVAC": ["Hand & power tools","Reading blueprints & specs","Safety awareness","Trades math & measurement"],
-    "Concrete": ["Materials handling (wood/concrete/metal)","Hand & power tools","Teamwork & collaboration","Physical stamina & dexterity"],
-    "Roofing": ["Safety awareness","Hand & power tools","Attention to detail","Physical stamina & dexterity"],
-    "Drywall": ["Hand & power tools","Attention to detail","Materials handling (wood/concrete/metal)","Teamwork & collaboration"],
-    "Ironworker": ["Safety awareness","Rigging basics","Hand & power tools","Working at heights"],
-    "Elevator Mechanic": ["Mechanical aptitude","Basic electrical","Tool proficiency","Safety awareness"],
-    "Cement Mason": ["Concrete basics","Tool proficiency","Safety awareness","Teamwork & collaboration"],
-    "Bricklayer": ["Attention to detail","Tool proficiency","Blueprint reading","Safety awareness"],
-    "Lineworker": ["Working at heights","Rigging basics","Basic electrical","Safety awareness"],
-    "Tree Trimmer": ["Rigging & ropes","Working at heights","Chainsaw safety","Teamwork & communication"],
-    "General": ["Safety awareness","Teamwork & collaboration","Time management","Problem-solving"],
+_SKILL_SYNONYMS = {
+    "problem solving":"Problem-solving","problem-solving":"Problem-solving",
+    "critical-thinking":"Critical thinking","attention to details":"Attention to detail",
+    "time-management":"Time management","teamwork":"Teamwork & collaboration",
+    "collaboration":"Teamwork & collaboration","adaptability":"Adaptability & willingness to learn",
+    "willingness to learn":"Adaptability & willingness to learn","safety":"Safety awareness",
+    "customer service skills":"Customer service","leadership skills":"Leadership",
+    "blueprints":"Reading blueprints & specs","tools":"Hand & power tools",
+    "machinery":"Operating machinery","math":"Trades math & measurement",
+    "measurements":"Trades math & measurement","compliance":"Regulatory compliance",
+    "stamina":"Physical stamina & dexterity",
 }
-
-TRADE_PROFILE = {
-    "Electrician": {"keywords": {"wire":"Pulled wire and organized materials under supervision",
-                                 "conduit":"Assisted with conduit measurements and layout",
-                                 "panel":"Maintained clean work area and accounted for fixtures and hardware",
-                                 "multimeter":"Assisted with basic checks under direction; prioritized safety"}},
-    "Ironworker": {"keywords": {"steel":"Handled materials and supported rigging tasks as directed",
-                                "rebar":"Assisted with rebar placement and site prep",
-                                "beam":"Maintained safe work zones; used fall protection per instruction"}},
-    "Elevator Mechanic": {"keywords": {"elevator":"Assisted with equipment staging and fastener prep",
-                                       "hoist":"Supported hoisting/rigging tasks per direction",
-                                       "control":"Maintained clean work areas; followed LOTO/PPE guidance"}},
-    "Plumber": {"keywords": {"pipe":"Assisted with pipe cutting, fitting, and material staging",
-                             "fixture":"Staged fixtures and maintained inventory organization"}},
-    "Concrete": {"keywords": {"pour":"Supported pours; used proper tools and cleanup procedures",
-                              "form":"Assisted with form setup/strip; verified measurements"}},
-    "Drywall": {"keywords": {"tape":"Assisted with taping/sanding; kept tools organized",
-                             "panel":"Staged and transported panels safely with spotter"}},
-    "General": {"keywords": {"clean":"Maintained clean work zones and followed safety procedures",
-                             "inventory":"Tracked basic materials and tools; reported shortages promptly"}}
-}
-
-# ─────────────────────────────────────────────────────────
-# Prior-industry translator (optional CSV, no AI)
-# ─────────────────────────────────────────────────────────
-def load_mapping(default_path: str = "career_to_construction.csv"):
-    rows=[]
-    if os.path.exists(default_path):
-        with open(default_path, newline="", encoding="utf-8") as f:
-            rows += list(csv.DictReader(f))
-    up = st.sidebar.file_uploader("Upload translation CSV (industry,keyword,replace_with,note)", type=["csv"])
-    if up is not None:
-        rows = list(csv.DictReader(io.StringIO(up.getvalue().decode("utf-8"))))
-    out=[]
-    for r in rows:
-        out.append({
-            "industry": (r.get("industry") or "").strip().lower(),
-            "keyword": (r.get("keyword") or "").strip().lower(),
-            "replace_with": (r.get("replace_with") or "").strip(),
-            "note": (r.get("note") or "").strip(),
-        })
-    return out
-
-def translate_line(s: str, mapping: List[Dict[str,str]], industry: str):
+def normalize_skill_label(s: str) -> str:
     base = (s or "").strip()
-    if not base or not mapping: return base
-    ind = (industry or "general").lower()
-    cands = [r for r in mapping if r["keyword"] and (r["industry"] in ("general", ind))]
-    low = base.lower()
-    for r in cands:
-        if r["keyword"] in low:
-            repl = r["replace_with"] or base
-            return base.replace(r["keyword"], repl) if r["keyword"] in base else repl
-    return base
-
-def translate_bullets(lines: List[str], mapping: List[Dict[str,str]], industry: str):
-    out=[]
-    for b in lines:
-        out.append(clean_bullet(translate_line(b, mapping, industry)))
-    return out
-
-def translate_skills(skills: List[str], mapping: List[Dict[str,str]], industry: str):
-    out=[]
-    for s in skills:
-        out.append(norm_ws(translate_line(s, mapping, industry)))
-    seen=set(); dedup=[]
-    for x in out:
-        k=x.lower()
-        if k in seen: continue
-        seen.add(k); dedup.append(x)
-    return dedup[:MAX_SKILLS]
+    key = re.sub(r"\s+"," ",base.lower())
+    mapped = _SKILL_SYNONYMS.get(key)
+    if mapped: return mapped
+    return re.sub(r"\s+"," ",base).strip().title()
 
 # ─────────────────────────────────────────────────────────
-# Upload text extraction
+# File text extraction
 # ─────────────────────────────────────────────────────────
 def extract_text_from_pdf(file) -> str:
     try:
-        reader = PdfReader(file)
-        chunks=[]
+        reader = PdfReader(file); chunks=[]
         for p in reader.pages:
             txt = p.extract_text() or ""
             chunks.append(txt)
@@ -251,15 +139,349 @@ def extract_text_generic(upload) -> str:
         return ""
 
 # ─────────────────────────────────────────────────────────
-# Bullet suggestions from JD text
+# Trade taxonomy — Seattle guidebook order (+ Lineman)
+# Families used for dropdown. Specialties/Pathways only where it helps routing/boost plan.
 # ─────────────────────────────────────────────────────────
-def suggest_bullets_from_text(text: str, trade: str) -> List[str]:
+TRADE_TAXONOMY = [
+    "Boilermaker (Local 104, 502)",
+    "Bricklayer / BAC Allied (Brick/Tile/Terrazzo/Marble/PCC)",
+    "Carpenter (General)",
+    "Carpenter – Interior Systems",
+    "Millwright",
+    "Pile Driver",
+    "Cement Mason (OPCMIA 528)",
+    "Drywall Finisher (IUPAT)",
+    "Electrician – Inside (01)",
+    "Electrician – Limited Energy (06)",
+    "Electrician – Residential (02)",
+    "Elevator Constructor (IUEC/NEIEP)",
+    "Floor Layer (IUPAT)",
+    "Glazier (IUPAT 188)",
+    "Heat & Frost Insulator (Local 7)",
+    "Ironworker (Local 86)",
+    "Laborer (LIUNA 242/252/292)",
+    "Operating Engineer (IUOE 302/612)",
+    "Painter (IUPAT DC5)",
+    "Plasterer (OPCMIA 528)",
+    "Plumber / Steamfitter / HVAC-R (UA 32 / UA 26)",
+    "Roofer (Local 54/153)",
+    "Sheet Metal (SMART 66)",
+    "Sprinkler Fitter (UA 699)",
+    # Not in book, but required per your instruction:
+    "High Voltage – Outside Lineman (NW Line JATC)",
+    "Power Line Clearance Tree Trimmer (NW Line JATC)",
+]
+
+# ─────────────────────────────────────────────────────────
+# Boost plans per trade (concise, app-readable). You can expand text anytime.
+# Keep language neutral (resume objective stays union-agnostic).
+# ─────────────────────────────────────────────────────────
+BOOST: Dict[str, Dict[str, Any]] = {
+    # pattern for each:
+    # "Trade Name": {
+    #   "certs": [ ... ],
+    #   "hold_over_jobs": [ ... ],
+    #   "pipelines_union": [ ... ],
+    #   "pipelines_open": [ ... ],
+    #   "math": "...",
+    #   "notes": "...",
+    # }
+    "Electrician – Inside (01)": {
+        "certs": [
+            "OSHA-30 (Construction Outreach)",
+            "Clean driving record; valid DL",
+            "Basic hand/power tool proficiency",
+        ],
+        "hold_over_jobs": [
+            "Electrical supplier/material handler",
+            "Solar install helper (under supervision)",
+            "Low-voltage helper (exposure to cabling, terminations)",
+        ],
+        "pipelines_union": [
+            "Puget Sound Electrical JATC (IBEW/NECA) – Inside (01)",
+            "Municipal utility apprenticeships (e.g., Electrician Constructor cycles)",
+        ],
+        "pipelines_open": [
+            "ABC Western Washington – Electrical apprenticeship (01/02/06 routes)",
+            "CITC – Electrical apprenticeship (verify ARTS listing)",
+        ],
+        "math": "Target algebra/geometry, measurement & conversions. Use local ABE/pre-college math for quick ramp.",
+        "notes": "WA requires apprenticeship route for 01 licensing; keep resume objective neutral (no union/non-union labels)."
+    },
+    "Electrician – Limited Energy (06)": {
+        "certs": [
+            "OSHA-30",
+            "Vendor micro-credentials helpful (fire alarm/CCTV/voice-data)",
+        ],
+        "hold_over_jobs": [
+            "Security/Fire alarm install helper",
+            "Data cabling tech helper",
+        ],
+        "pipelines_union": [
+            "PSEJATC – Limited Energy (06)",
+        ],
+        "pipelines_open": [
+            "ABC WW – Limited Energy",
+            "CITC – Low-voltage/06",
+        ],
+        "math": "Basic DC concepts, low-voltage color codes, measurement.",
+        "notes": "Keep objective neutral; do not say 'low-voltage' in the summary line."
+    },
+    "Electrician – Residential (02)": {
+        "certs": ["OSHA-30"],
+        "hold_over_jobs": ["Residential electrical helper", "Warehouse/parts runner"],
+        "pipelines_union": ["PSEJATC – Residential (02)"],
+        "pipelines_open": ["ABC WW – Residential", "CITC – Residential"],
+        "math": "Algebra, measurement, basic circuits.",
+        "notes": "Neutral objective."
+    },
+    "High Voltage – Outside Lineman (NW Line JATC)": {
+        "certs": [
+            "CDL-B (work toward CDL-A)",
+            "OSHA-30",
+            "First Aid/CPR (site standard)",
+        ],
+        "hold_over_jobs": [
+            "Groundman with line contractors",
+            "Traffic control (Flagger) on line projects",
+            "Yard/utility material handler",
+        ],
+        "pipelines_union": [
+            "NW Line JATC – Outside Lineman (regional)",
+            "Seattle City Light – PAL → Line apprenticeship cycles",
+        ],
+        "pipelines_open": [
+            "Direct-hire trainee roles with merit-shop line contractors (confirm job is legitimate; ARTS if they claim 'apprenticeship')"
+        ],
+        "math": "Strong arithmetic, ratios, mechanical reasoning; prep for CAST-style testing.",
+        "notes": "Be climbing/fitness ready; travel likely. Keep resume objective neutral."
+    },
+    "Power Line Clearance Tree Trimmer (NW Line JATC)": {
+        "certs": [
+            "CDL-B permit early",
+            "Intro to Arboriculture Safety (free micro-course)",
+            "Pesticide study prep (WSU/WSDA manuals) if vegetation mgmt applies",
+        ],
+        "hold_over_jobs": [
+            "Vegetation management groundworker",
+            "Traffic control",
+            "Yard/material staging for line crews",
+        ],
+        "pipelines_union": [
+            "NW Line JATC – Tree Trimmer (year-round application; monthly ranking)"
+        ],
+        "pipelines_open": [
+            "Direct-hire vegetation management companies; verify training & safety standards"
+        ],
+        "math": "Measurement & rigging ratios basics.",
+        "notes": "Resume objective stays neutral; tree/line proximity work emphasizes safety and comms."
+    },
+    "Carpenter (General)": {
+        "certs": ["OSHA-30", "Employer forklift eval on hire"],
+        "hold_over_jobs": ["Framing helper", "Concrete formwork helper", "Warehouse/tool crib"],
+        "pipelines_union": ["Western States Carpenters – JATC (regional)"],
+        "pipelines_open": ["CITC – Carpentry"],
+        "math": "Fractions, angles, layout (rise/run).",
+        "notes": "Add rigging/fall-protection awareness modules where possible."
+    },
+    "Carpenter – Interior Systems": {
+        "certs": ["OSHA-30", "MEWP (employer eval on hire)"],
+        "hold_over_jobs": ["Drywall stocking/board hanger helper", "Acoustical ceiling install helper"],
+        "pipelines_union": ["Western States Carpenters – Interior Systems"],
+        "pipelines_open": ["CITC – Carpentry/Scaffold Erector"],
+        "math": "Tape measure fluency, layout.",
+        "notes": "ICRA (healthcare) awareness helps."
+    },
+    "Millwright": {
+        "certs": ["OSHA-30"],
+        "hold_over_jobs": ["Industrial maintenance helper", "Fabrication shop helper"],
+        "pipelines_union": ["Carpenters/Millwright JATC"],
+        "pipelines_open": ["Check ARTS for open-shop millwright sponsors"],
+        "math": "Precision measurement.",
+        "notes": "Welding/rigger basics stand out."
+    },
+    "Pile Driver": {
+        "certs": ["OSHA-30", "MEWP (employer eval on hire)"],
+        "hold_over_jobs": ["Marine yard helper", "Concrete/bridge prep"],
+        "pipelines_union": ["Pile Drivers – UBC"],
+        "pipelines_open": ["ARTS search for open-shop marine/pile apprenticeships"],
+        "math": "Rigging angles, load basics.",
+        "notes": "Water work readiness and fitness."
+    },
+    "Cement Mason (OPCMIA 528)": {
+        "certs": ["OSHA-30"],
+        "hold_over_jobs": ["Concrete placement/labor"],
+        "pipelines_union": ["OPCMIA 528 apprenticeship"],
+        "pipelines_open": ["ARTS check for cement mason open-shop sponsors"],
+        "math": "Measurement, slopes/grades.",
+        "notes": "Early morning starts; weather-ready."
+    },
+    "Drywall Finisher (IUPAT)": {
+        "certs": ["OSHA-30", "MEWP (employer eval)"],
+        "hold_over_jobs": ["Finisher helper", "Paint prep"],
+        "pipelines_union": ["IUPAT finishing apprenticeship"],
+        "pipelines_open": ["CITC – Painting (finish path)"],
+        "math": "Measurement, batch ratios.",
+        "notes": "Dust control & PPE habits."
+    },
+    "Elevator Constructor (IUEC/NEIEP)": {
+        "certs": ["OSHA-30"],
+        "hold_over_jobs": ["Mechanical/electrical helper roles, facilities maintenance"],
+        "pipelines_union": ["NEIEP/Local 19 opportunities portal"],
+        "pipelines_open": ["Rare open-shop; verify in ARTS if claimed"],
+        "math": "Algebra/trig basics; precision layout.",
+        "notes": "Customer-facing professionalism matters."
+    },
+    "Ironworker (Local 86)": {
+        "certs": ["OSHA-30"],
+        "hold_over_jobs": ["Rebar placing helper", "Fab shop helper"],
+        "pipelines_union": ["Ironworkers Local 86 apprenticeship"],
+        "pipelines_open": ["Check ARTS for open-shop ironworker/rebar sponsors"],
+        "math": "Fractions, angles, reading simple details.",
+        "notes": "Working at heights; fitness."
+    },
+    "Laborer (LIUNA 242/252/292)": {
+        "certs": ["OSHA-30", "Flagger → Traffic Control Supervisor after hours"],
+        "hold_over_jobs": ["TC/Flagging crews", "General site labor", "Erosion control"],
+        "pipelines_union": ["Laborers JATC (by local)"],
+        "pipelines_open": ["CITC – Construction Craft Laborer"],
+        "math": "Basic measurement & production math.",
+        "notes": "Great entry while ranking elsewhere."
+    },
+    "Operating Engineer (IUOE 302/612)": {
+        "certs": ["OSHA-30", "CDL-A path helpful"],
+        "hold_over_jobs": ["Equipment yard helper", "Civil labor with grading crews"],
+        "pipelines_union": ["IUOE 302/612 apprenticeship"],
+        "pipelines_open": ["CITC – Heavy Equipment Operator (if listed)"],
+        "math": "Grade math, production math.",
+        "notes": "Expect travel and outdoor work."
+    },
+    "Painter (IUPAT DC5)": {
+        "certs": ["OSHA-30", "MEWP (employer eval)"],
+        "hold_over_jobs": ["Prep/labor, warehouse tinting"],
+        "pipelines_union": ["IUPAT DC5 – Painter"],
+        "pipelines_open": ["CITC – Painting"],
+        "math": "Ratios for mixing, coverage math.",
+        "notes": "Customer-facing; finish quality."
+    },
+    "Plasterer (OPCMIA 528)": {
+        "certs": ["OSHA-30"],
+        "hold_over_jobs": ["Stucco/lath helper"],
+        "pipelines_union": ["OPCMIA 528"],
+        "pipelines_open": ["ARTS for open-shop plaster pathways"],
+        "math": "Measurement, ratios.",
+        "notes": "Exterior/weather work."
+    },
+    "Plumber / Steamfitter / HVAC-R (UA 32 / UA 26)": {
+        "certs": ["EPA 608 (Universal)", "OSHA-30"],
+        "hold_over_jobs": ["HVAC helper", "Plumbing warehouse/runner", "Sheet-metal shop helper"],
+        "pipelines_union": ["UA 32/SAPT (King)", "UA 26 (Pierce/Snohomish)"],
+        "pipelines_open": ["CITC – Plumbing/HVAC (verify ARTS listing)"],
+        "math": "Fractions, pressure/temp basics, measurement.",
+        "notes": "Service roles need DL/MVR; brazing helps."
+    },
+    "Roofer (Local 54/153)": {
+        "certs": ["OSHA-30", "MEWP employer eval"],
+        "hold_over_jobs": ["Roof tear-off/prep", "Materials hoisting"],
+        "pipelines_union": ["Roofers Local 54 (King/Snohomish), 153 (Pierce)"],
+        "pipelines_open": ["ARTS for open-shop roofing sponsors"],
+        "math": "Squares/coverage math.",
+        "notes": "Heights & weather stamina."
+    },
+    "Sheet Metal (SMART 66)": {
+        "certs": ["OSHA-30", "EPA 608 for service track"],
+        "hold_over_jobs": ["Duct shop helper", "Install helper"],
+        "pipelines_union": ["SMART 66 JATC (fabrication/install/service/TAB)"],
+        "pipelines_open": ["CITC – Sheet Metal"],
+        "math": "Layout, measurement, basic geometry.",
+        "notes": "Controls/service cross with electrical rules—keep objective neutral."
+    },
+    "Sprinkler Fitter (UA 699)": {
+        "certs": ["OSHA-30"],
+        "hold_over_jobs": ["Fire protection install helper", "Warehouse/pipe prep"],
+        "pipelines_union": ["UA 699 – Sprinkler Fitter"],
+        "pipelines_open": ["ARTS for open-shop sprinkler apprenticeships"],
+        "math": "Measurement, prints reading basics.",
+        "notes": "NICET later is valuable."
+    },
+    "Boilermaker (Local 104, 502)": {
+        "certs": ["OSHA-30"],
+        "hold_over_jobs": ["Shop fabrication helper", "Welder’s helper"],
+        "pipelines_union": ["IBB Local 104 / 502"],
+        "pipelines_open": ["ARTS for shop-based boilermaker/fab apprenticeships"],
+        "math": "Blueprint basics, measurement.",
+        "notes": "Welding certs make you stand out."
+    },
+    "Bricklayer / BAC Allied (Brick/Tile/Terrazzo/Marble/PCC)": {
+        "certs": ["OSHA-30"],
+        "hold_over_jobs": ["Masonry laborer", "Tile setter helper"],
+        "pipelines_union": ["BAC 1 WA/AK"],
+        "pipelines_open": ["ARTS for open-shop masonry/tile"],
+        "math": "Layout, coverage math.",
+        "notes": "Back/ergonomics awareness."
+    },
+    "Floor Layer (IUPAT)": {
+        "certs": ["OSHA-30"],
+        "hold_over_jobs": ["Flooring install helper", "Warehouse/tint"],
+        "pipelines_union": ["IUPAT Floor Layers"],
+        "pipelines_open": ["ARTS for open-shop floor covering"],
+        "math": "Coverage & takeoff math.",
+        "notes": "Customer-facing install work."
+    },
+    "Glazier (IUPAT 188)": {
+        "certs": ["OSHA-30", "MEWP employer eval"],
+        "hold_over_jobs": ["Glass shop helper", "Install helper"],
+        "pipelines_union": ["Glaziers Local 188"],
+        "pipelines_open": ["CITC – Glazier"],
+        "math": "Measurement/reading shop drawings.",
+        "notes": "Handling glass safely is key."
+    },
+    "Heat & Frost Insulator (Local 7)": {
+        "certs": ["OSHA-30"],
+        "hold_over_jobs": ["Mechanical insulation helper"],
+        "pipelines_union": ["Local 7 – Insulators"],
+        "pipelines_open": ["ARTS for open-shop insulation"],
+        "math": "Measurement, layout.",
+        "notes": "Industrial/jobsite PPE focus."
+    },
+}
+
+# ─────────────────────────────────────────────────────────
+# JD → hint bullets by trade (lightweight heuristics)
+# ─────────────────────────────────────────────────────────
+TRADE_HINTS = {
+    "High Voltage – Outside Lineman (NW Line JATC)": {
+        "wire":"Assisted with wire pulls and site staging",
+        "climb":"Maintained climbing readiness and proper PPE use",
+        "bucket":"Supported bucket-truck operations per direction",
+        "energized":"Followed safety protocols around energized equipment",
+    },
+    "Power Line Clearance Tree Trimmer (NW Line JATC)": {
+        "rigging":"Supported ground rigging and controlled lower",
+        "chainsaw":"Used chainsaw under supervision; maintained safety zone",
+        "climb":"Followed signals; assisted crews and used PPE",
+    },
+    "Electrician – Inside (01)": {
+        "conduit":"Assisted with conduit measurements and layout",
+        "panel":"Maintained organized work area and accounted for hardware",
+        "blueprint":"Read basic plan notes with guidance",
+    },
+    "Carpenter (General)": {
+        "framing":"Assisted with layout and framing tasks; verified measurements",
+        "forms":"Set and stripped simple forms with supervision",
+    },
+    "Plumber / Steamfitter / HVAC-R (UA 32 / UA 26)": {
+        "brazing":"Assisted with torch/brazing under supervision",
+        "hvac":"Handled materials and maintained clean, safe work zones",
+    },
+}
+
+def suggest_bullets(text: str, trade: str) -> List[str]:
     low = (text or "").lower()
-    profile = TRADE_PROFILE.get(trade, TRADE_PROFILE["General"])
+    hints = TRADE_HINTS.get(trade, {})
     out=[]
-    for kw, stub in profile["keywords"].items():
-        if kw in low:
-            out.append(stub)
+    for kw, stub in hints.items():
+        if kw in low: out.append(stub)
     if not out and low.strip():
         out = [
             "Maintained clean work zones and followed safety procedures",
@@ -267,8 +489,9 @@ def suggest_bullets_from_text(text: str, trade: str) -> List[str]:
         ]
     seen=set(); dedup=[]
     for b in out:
-        if b.lower() in seen: continue
-        seen.add(b.lower()); dedup.append(clean_bullet(b))
+        k=b.lower()
+        if k in seen: continue
+        seen.add(k); dedup.append(clean_bullet(b))
     return dedup[:MAX_BULLETS_PER_JOB]
 
 # ─────────────────────────────────────────────────────────
@@ -286,28 +509,23 @@ class School:
     school:str=""; credential:str=""; year:str=""; details:str=""
 
 # ─────────────────────────────────────────────────────────
-# Build resume context for template
+# Resume context + rendering
 # ─────────────────────────────────────────────────────────
-def build_resume_context(form: Dict[str,Any], mapping: List[Dict[str,str]], prior_industry:str, trade:str) -> Dict[str,Any]:
+def build_resume_context(form: Dict[str,Any], trade_label: str) -> Dict[str,Any]:
     Name=cap_first(form["Name"]); City=cap_first(form["City"]); State=(form["State"] or "").strip().upper()
     phone=clean_phone(form["Phone"]); email=clean_email(form["Email"])
     summary = strip_banned(norm_ws(form["Objective_Final"]))[:MAX_SUMMARY_CHARS]
 
+    # Skills normalization + dedupe
     skills_all=[]
     for raw in (form["Skills_Transferable"], form["Skills_JobSpecific"], form["Skills_SelfManagement"]):
         skills_all += split_list(raw)
-
-    seen=set(); skills_norm=[]
+    seen=set(); skills=[]
     for s in skills_all:
         lab=normalize_skill_label(norm_ws(s))
         if lab and lab.lower() not in seen:
-            seen.add(lab.lower()); skills_norm.append(lab)
-
-    for s in TRADE_SKILL_SUGGEST.get(trade, []):
-        if s.lower() not in seen:
-            seen.add(s.lower()); skills_norm.append(s)
-
-    skills = translate_skills(skills_norm, mapping, prior_industry)
+            seen.add(lab.lower()); skills.append(lab)
+    skills = skills[:MAX_SKILLS]
 
     certs = [norm_ws(c) for c in split_list(form["Certifications"] )][:MAX_CERTS]
 
@@ -318,9 +536,8 @@ def build_resume_context(form: Dict[str,Any], mapping: List[Dict[str,str]], prio
         if not any([company, title, duties]): continue
         s,e = parse_dates(dates)
         raw_b = [b for b in (duties or "").splitlines() if b.strip()]
-        trans_b = translate_bullets(raw_b, mapping, prior_industry)
         j = Job(company=cap_first(company), role=cap_first(title), city=cap_first(cityst),
-                start=norm_ws(s), end=norm_ws(e), bullets=trans_b)
+                start=norm_ws(s), end=norm_ws(e), bullets=raw_b)
         j.trim(MAX_BULLETS_PER_JOB); jobs.append(j)
     jobs = jobs[:MAX_JOBS]
 
@@ -340,12 +557,13 @@ def build_resume_context(form: Dict[str,Any], mapping: List[Dict[str,str]], prio
         summary = (summary + " " + add).strip()[:MAX_SUMMARY_CHARS]
 
     return {
-        "Name": Name, " City": City, "City": City, " State": State, "State": State,
+        "Name": Name, "City": City, "State": State,
         "phone": phone, "email": email, "summary": summary,
-        "skills": skills[:MAX_SKILLS],
+        "skills": skills,
         "certs": certs,
         "jobs": [asdict(j) for j in jobs if any([j.company,j.role,j.bullets])],
         "schools": [asdict(s) for s in schools if any([s.school,s.credential,s.year,s.details])],
+        "trade_label": trade_label,
     }
 
 def render_docx_with_template(template_bytes: bytes, context: Dict[str,Any]) -> bytes:
@@ -354,117 +572,64 @@ def render_docx_with_template(template_bytes: bytes, context: Dict[str,Any]) -> 
     out = io.BytesIO(); tpl.save(out); out.seek(0)
     return out.getvalue()
 
-# ─────────────────────────────────────────────────────────
-# Cover letter (built with python-docx so no extra template needed)
-# ─────────────────────────────────────────────────────────
 def build_cover_letter_docx(data: Dict[str,str]) -> bytes:
-    # sanitize user text against banned terms
     role = strip_banned(data.get("role",""))
     company = strip_banned(data.get("company",""))
     body_strength = strip_banned(data.get("strength",""))
-    trade = strip_banned(data.get("trade",""))
+    trade_label = strip_banned(data.get("trade_label",""))
     app_type = (data.get("application_type","Apprenticeship") or "Apprenticeship").strip()
 
     doc = DocxWriter()
-    styles = doc.styles['Normal']
-    styles.font.name = 'Calibri'
-    styles.font.size = Pt(11)
+    styles = doc.styles['Normal']; styles.font.name = 'Calibri'; styles.font.size = Pt(11)
 
-    # Header-ish block
     doc.add_paragraph(f"{data.get('name','')}")
     doc.add_paragraph(f"{data.get('city','')}, {data.get('state','')}")
     contact = ", ".join([x for x in [data.get('phone',''), data.get('email','')] if x])
     if contact: doc.add_paragraph(contact)
-    doc.add_paragraph("")  # spacer
+    doc.add_paragraph("")
 
-    # Date & recipient
     today = datetime.date.today().strftime("%B %d, %Y")
     doc.add_paragraph(today)
     if company: doc.add_paragraph(company)
     if data.get("location"): doc.add_paragraph(data["location"])
     doc.add_paragraph("")
-
-    # Greeting
     doc.add_paragraph("Dear Hiring Committee,")
 
-    # Body (neutral to union / sub-trade)
     p1 = doc.add_paragraph()
     p1.add_run(
         f"I’m applying for a {role} {('apprenticeship' if app_type=='Apprenticeship' else 'position')} "
-        f"in the {trade} scope. I bring reliability, safety awareness, and hands-on readiness to contribute on day one."
+        f"in the {trade_label} scope. I bring reliability, safety awareness, and hands-on readiness."
     )
-
     p2 = doc.add_paragraph()
     p2.add_run(
-        "My background includes construction-site experience, tool proficiency, and teamwork under real schedules. "
-        "I’m punctual, coachable, and committed to quality and safe production."
+        "My background includes tool proficiency, teamwork under real schedules, and a commitment to quality and safe production."
     )
-
     if body_strength:
         doc.add_paragraph("Highlights:")
         for line in split_list(body_strength):
-            doc.add_paragraph(f"• {line}", style=None)
-
-    p3 = doc.add_paragraph()
-    p3.add_run(
-        "Thank you for your consideration. I’m ready to support your crew and learn the trade the right way."
-    )
+            doc.add_paragraph(f"• {line}")
 
     doc.add_paragraph("")
-    doc.add_paragraph(f"Sincerely,")
+    doc.add_paragraph("Thank you for your consideration. I’m ready to support your crew and learn the trade the right way.")
+    doc.add_paragraph("")
+    doc.add_paragraph("Sincerely,")
     doc.add_paragraph(data.get("name",""))
 
     bio = io.BytesIO(); doc.save(bio); bio.seek(0)
     return bio.getvalue()
 
-# ─────────────────────────────────────────────────────────
-# Instructor Pathway Packet (FULL TEXT — no summaries)
-# ─────────────────────────────────────────────────────────
-def choose_relevant_pathway_files(trade: str, uploads: List[Any]) -> List[Any]:
-    """
-    Select files whose names hint at the chosen trade. Always include any general packet.
-    """
-    name_hits=[]
-    t = trade.lower()
-    keywords = {
-        "electrician": ["electric","line","tacoma power","meter","wire"],
-        "ironworker": ["iron","rebar","steel"],
-        "elevator mechanic": ["elevator","escalator","lift","neiep","iuec"],
-        "plumber": ["plumb","pipe","roadmap"],
-        "cement mason": ["cement","concrete","mason"],
-        "bricklayer": ["brick","masonry","bac"],
-        "lineworker": ["line jatc","lineworker","tree","powerline"],
-        "tree trimmer": ["tree","clearance","power line"],
-        "general": [],
-    }
-    kw = keywords.get(trade.lower(), [])
-    for f in uploads:
-        name = f.name.lower()
-        if "seattle construction trades apprenticeship roadmaps" in name:  # general
-            name_hits.append(f); continue
-        if not kw: continue
-        if any(k in name for k in kw):
-            name_hits.append(f)
-    # If nothing matched, include all so instructors still get everything (full text)
-    return name_hits or uploads
-
-def build_pathway_packet_docx(student: Dict[str,str], trade: str, app_type: str, sources: List[Any]) -> bytes:
-    """
-    Create DOCX that embeds FULL TEXT from each uploaded pathway document.
-    """
+def build_pathway_packet_docx(student: Dict[str,str], trade_label: str, app_type: str, sources: List[Any]) -> bytes:
     doc = DocxWriter()
     styles = doc.styles['Normal']; styles.font.name = 'Calibri'; styles.font.size = Pt(11)
 
     doc.add_heading("Instructor Pathway Packet", level=0)
-    meta = f"Student: {student.get('name','')} | Trade: {trade} | Application type: {app_type}"
-    doc.add_paragraph(meta)
-    doc.add_paragraph("")
+    meta = f"Student: {student.get('name','')} | Target: {trade_label} | Application type: {app_type}"
+    doc.add_paragraph(meta); doc.add_paragraph("")
 
-    for upl in sources:
+    for upl in sources or []:
         doc.add_page_break()
         doc.add_heading(upl.name, level=1)
         text = extract_text_generic(upl)
-        # Include all text, no summarization
         if text.strip():
             for line in text.splitlines():
                 doc.add_paragraph(line)
@@ -475,12 +640,11 @@ def build_pathway_packet_docx(student: Dict[str,str], trade: str, app_type: str,
     return out.getvalue()
 
 # ─────────────────────────────────────────────────────────
-# Sidebar — templates, mappings, pathway sources, auto trade discovery
+# Sidebar — template & docs
 # ─────────────────────────────────────────────────────────
 with st.sidebar:
-    st.header("Templates & Options")
+    st.header("Templates & Docs")
 
-    # Resume template
     tpl_bytes=None
     if os.path.exists("resume_app_template.docx"):
         with open("resume_app_template.docx","rb") as f: tpl_bytes=f.read()
@@ -488,86 +652,80 @@ with st.sidebar:
     if upl_tpl is not None: tpl_bytes = upl_tpl.read()
 
     st.markdown("---")
-    mapping = load_mapping()
-    prior_industry = st.selectbox(
-        "Prior industry (optional translator, no AI)",
-        ["general","retail","food service","warehouse","janitorial","childcare",
-         "call center","security","delivery","reception","housekeeping",
-         "fitness","teaching","artist","data entry","grocery","landscaping"],
-        index=0
-    )
-
-    st.markdown("---")
-    st.caption("Upload pathway/source docs (PDF/DOCX/TXT). These will be embedded FULL TEXT in the Instructor Packet.")
+    st.caption("Upload pathway/source docs (PDF/DOCX/TXT). Full text is embedded in the Instructor Packet.")
     pathway_uploads = st.file_uploader("Upload pathway documents", type=["pdf","docx","txt"], accept_multiple_files=True)
 
-    st.caption("Optional: upload your Apprenticeship Packet to auto-discover trades (e.g., Seattle Construction Trades packet).")
-    trade_packet = st.file_uploader("Upload apprenticeship packet (PDF/DOCX)", type=["pdf","docx"])
-
-# Auto-discover trades present in a packet (simple keyword scan)
-def discover_trades(packet_upload) -> List[str]:
-    text = extract_text_generic(packet_upload) if packet_upload else ""
-    found=[]
-    low=text.lower()
-    for t in MASTER_TRADES:
-        if t.lower() in low: found.append(t)
-    return sorted(set(found)) if found else []
-
-discovered = discover_trades(trade_packet)
-TRADE_OPTIONS = discovered or MASTER_TRADES
-
 # ─────────────────────────────────────────────────────────
-# Main UI
+# Main UI — Workshop
 # ─────────────────────────────────────────────────────────
-st.markdown("# Resume & Cover Letter Workshop")
+st.title("Resume Workshop & Pathways (Seattle Tri-County)")
 
-# 1) Application type & trade
-st.subheader("1) Target & Trade")
-colA, colB = st.columns([1,1])
-with colA:
-    application_type = st.radio("Are you applying for:", ["Apprenticeship","Job"], index=0, horizontal=True)
-with colB:
-    trade = st.selectbox("Select your trade target:", TRADE_OPTIONS, index=0)
+# 1) Target trade + application type
+st.subheader("1) Target Trade & Application Type")
+c1, c2 = st.columns([1,2])
+with c1:
+    application_type = st.radio("Applying for:", ["Apprenticeship","Job"], index=0, horizontal=True)
+with c2:
+    trade = st.selectbox("Trade (guidebook order + lineman):", TRADE_TAXONOMY, index=TRADE_TAXONOMY.index("Electrician – Inside (01)"))
 
-# 2) Upload job descriptions/postings
-st.subheader("2) Upload job descriptions or postings (PDF, DOCX, TXT)")
-uploads = st.file_uploader("Upload one or more files", type=["pdf","docx","txt"], accept_multiple_files=True)
+# 2) Boost Plan (read-only guidance per trade)
+st.subheader("2) Boost Plan (Do these to stand out)")
+bp = BOOST.get(trade, {})
+if not bp:
+    st.info("Select a trade to view its Boost Plan.")
+else:
+    a,b = st.columns(2)
+    with a:
+        st.markdown("**Certifications / Prep**")
+        for x in bp.get("certs", []): st.write(f"- {x}")
+        st.markdown("**Hold-over Jobs (while you apply/rank)**")
+        for x in bp.get("hold_over_jobs", []): st.write(f"- {x}")
+        st.markdown("**Math / Study Focus**")
+        st.write(bp.get("math",""))
+    with b:
+        st.markdown("**Pipelines — Union**")
+        for x in bp.get("pipelines_union", []): st.write(f"- {x}")
+        st.markdown("**Pipelines — Open-shop**")
+        for x in bp.get("pipelines_open", []): st.write(f"- {x}")
+        st.markdown("**Notes**")
+        st.write(bp.get("notes",""))
+
+# 3) Upload job descriptions/postings (optional)
+st.subheader("3) Upload Job Descriptions / Postings (optional)")
+uploads = st.file_uploader("Upload one or more files (PDF/DOCX/TXT). We’ll mine light hints.", type=["pdf","docx","txt"], accept_multiple_files=True)
 jd_text = ""
 if uploads:
     for f in uploads:
         jd_text += "\n" + extract_text_generic(f)
-jd_suggestions = suggest_bullets_from_text(jd_text, trade) if jd_text else []
 
+# 4) Contact & objective
 with st.form("workshop"):
-    # 3) Contact
-    st.subheader("3) Contact")
-    c1,c2 = st.columns(2)
+    st.subheader("4) Contact & Objective")
+    c1, c2 = st.columns(2)
     with c1:
         Name = st.text_input("Name","")
         City = st.text_input("City","")
         State = st.text_input("State (2-letter)","")
-    with c2:
         Phone = st.text_input("Phone","")
         Email = st.text_input("Email","")
-
-    # 4) Objective (union-neutral)
-    st.subheader("4) Objective")
-    st.caption("Neutral wording (no union/non-union, no sub-trade labels).")
-    Obj_Seeking = st.text_input("Target role (e.g., Entry-level Electrician / Pre-apprentice):", f"{trade} pre-apprentice" if application_type=="Apprenticeship" else f"Entry-level {trade}")
-    Obj_Quality = st.text_input("One strength to highlight (e.g., safety, reliability):","safety mindset")
-    Objective_Final = st.text_area("Final objective (1–2 sentences):","I’m seeking hands-on experience as an entry-level contributor in construction, bringing a safety mindset, reliability, and readiness to learn.")
+    with c2:
+        default_role = f"{trade} pre-apprentice" if application_type=="Apprenticeship" else f"Entry-level {trade}"
+        Obj_Seeking = st.text_input("Target role (neutral wording):", default_role)
+        Obj_Quality = st.text_input("One strength to highlight:", "safety mindset")
+        Objective_Final = st.text_area("Final objective (1–2 sentences):",
+            "I’m seeking hands-on experience as an entry-level contributor in construction, bringing a safety mindset, reliability, and readiness to learn.")
 
     # 5) Skills
     st.subheader("5) Skills")
     quick_transfer = st.multiselect("Quick add transferable skills:", SKILL_CANON, default=[])
-    quick_trade = st.multiselect("Quick add trade-specific skills:", TRADE_SKILL_SUGGEST.get(trade, []), default=TRADE_SKILL_SUGGEST.get(trade, []))
-    Skills_Transferable = st.text_area("Extra Transferable Skills (comma/newline):","")
+    Skills_Transferable = st.text_area("Transferable Skills (comma/newline):","")
     Skills_JobSpecific = st.text_area("Job-Specific Skills (comma/newline):","")
     Skills_SelfManagement = st.text_area("Self-Management Skills (comma/newline):","")
 
     # 6) Work Experience
     st.subheader("6) Work Experience (up to 3)")
     job_blocks=[]
+    jd_defaults = suggest_bullets(jd_text, trade) if jd_text else []
     for idx in range(1, MAX_JOBS+1):
         st.markdown(f"**Job {idx}**")
         j1,j2 = st.columns(2)
@@ -578,13 +736,14 @@ with st.form("workshop"):
         with j2:
             JobTitle   = st.text_input(f"Job {idx} – Title:", key=f"J{idx}t")
             placeholder = "One per line, e.g., Assisted with conduit layout\nUsed PPE and kept work zone clean"
-            defaults = "\n".join(jd_suggestions) if (idx==1 and jd_suggestions) else ""
+            defaults = "\n".join(jd_defaults) if (idx==1 and jd_defaults) else ""
             JobDuties  = st.text_area(f"Job {idx} – Duties/Accomplishments (1–4 bullets):", key=f"J{idx}du", value=defaults, placeholder=placeholder)
         job_blocks.append((JobCompany, JobCitySt, JobDates, JobTitle, JobDuties))
 
     # 7) Certifications
     st.subheader("7) Certifications")
-    Certifications = st.text_area("List certifications (comma/newline). If none, write 'None yet' or planned:","OSHA-10")
+    default_certs = "OSHA-10, Flagger (WA), Forklift operator (employer eval required on hire)"
+    Certifications = st.text_area("List certifications (comma/newline).", default_certs)
 
     # 8) Education
     st.subheader("8) Education (up to 2)")
@@ -602,17 +761,17 @@ with st.form("workshop"):
     Other_Work = st.text_area("Other Work Experience (optional):","")
     Volunteer  = st.text_area("Volunteer Experience (optional):","")
 
-    # 10) Cover Letter fields
+    # 10) Cover Letter
     st.subheader("10) Cover Letter")
     CL_Company = st.text_input("Company/Employer (for the letter):","")
-    CL_Role    = st.text_input("Role Title (for the letter):", f"{trade} Apprentice" if application_type=="Apprenticeship" else f"Entry-level {trade}")
+    CL_Role    = st.text_input("Role Title (for the letter):", default_role)
     CL_Location= st.text_input("Company Location (City, State):","")
     CL_Highlights = st.text_area("Optional: bullet highlights (comma/newline):","Reliable • Safety-focused • Coachable")
 
     submitted = st.form_submit_button("Generate Resume + Cover Letter + Instructor Packet", type="primary")
 
 # ─────────────────────────────────────────────────────────
-# Build → Validate → Export
+# Build → Export
 # ─────────────────────────────────────────────────────────
 if submitted:
     problems=[]
@@ -625,10 +784,8 @@ if submitted:
     # Merge quick-adds
     if quick_transfer:
         Skills_Transferable = (Skills_Transferable + (", " if Skills_Transferable.strip() else "") + ", ".join(quick_transfer))
-    if quick_trade:
-        Skills_JobSpecific = (Skills_JobSpecific + (", " if Skills_JobSpecific.strip() else "") + ", ".join(quick_trade))
 
-    # Build intake dict
+    # Intake dict
     form = {
         "Name": Name, "City": City, "State": State,
         "Phone": Phone, "Email": Email,
@@ -646,27 +803,47 @@ if submitted:
     for i,(sch,cs,d,cr) in enumerate(edu_blocks, start=1):
         form[f"Edu{i}_School"]=sch; form[f"Edu{i}_CityState"]=cs; form[f"Edu{i}_Dates"]=d; form[f"Edu{i}_Credential"]=cr
 
-    # Counts/debug
-    skills_count = len(split_list(Skills_Transferable)+split_list(Skills_JobSpecific)+split_list(Skills_SelfManagement))
-    certs_count  = len(split_list(Certifications))
-    jobs_count   = sum(1 for i in range(1,MAX_JOBS+1) if form.get(f"Job{i}_Company") or form.get(f"Job{i}_Title"))
-    schools_count= sum(1 for i in range(1,MAX_SCHOOLS+1) if form.get(f"Edu{i}_School") or form.get(f"Edu{i}_Credential"))
-    st.info(f"Counts → Summary: {len(Objective_Final)} chars | Skills: {skills_count} | Certs: {certs_count} | Jobs: {jobs_count} | Schools: {schools_count}")
+    trade_label = trade
 
     # Resume via template
     if not tpl_bytes:
         st.error("Template not found. Put resume_app_template.docx in the repo or upload it in the sidebar.")
         st.stop()
-
     try:
-        resume_ctx = build_resume_context(form, mapping, prior_industry, trade)
+        resume_ctx = build_resume_context(form, trade_label)
         resume_bytes = render_docx_with_template(tpl_bytes, resume_ctx)
     except Exception as e:
         st.error(f"Resume template rendering failed: {e}")
         st.stop()
 
-    # Cover letter (union-neutral)
+    # Cover letter
     cover_bytes = build_cover_letter_docx({
         "name": Name, "city": City, "state": State, "phone": clean_phone(Phone), "email": clean_email(Email),
         "company": CL_Company, "role": CL_Role, "location": CL_Location,
-        "trade": trade, "strength":
+        "trade_label": trade_label, "strength": CL_Highlights,
+        "application_type": application_type,
+    })
+
+    # Instructor Packet (full text)
+    packet_bytes = build_pathway_packet_docx({"name": Name}, trade_label, application_type, pathway_uploads)
+
+    safe_name = (Name or "Student").replace(" ","_")
+    st.download_button("Download Resume (DOCX)", data=resume_bytes,
+                       file_name=f"{safe_name}_Resume.docx",
+                       mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                       use_container_width=True)
+    st.download_button("Download Cover Letter (DOCX)", data=cover_bytes,
+                       file_name=f"{safe_name}_Cover_Letter.docx",
+                       mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                       use_container_width=True)
+    st.download_button("Download Instructor Pathway Packet (DOCX)", data=packet_bytes,
+                       file_name=f"{safe_name}_Instructor_Pathway_Packet.docx",
+                       mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                       use_container_width=True)
+
+    # Intake CSV snapshot
+    buf=io.StringIO(); w=csv.writer(buf); fields=list(form.keys()); w.writerow(fields); w.writerow([form[k] for k in fields])
+    st.download_button("Download Intake CSV", data=buf.getvalue().encode("utf-8"),
+                       file_name=f"{safe_name}_Workshop_Intake.csv", mime="text/csv",
+                       use_container_width=True)
+    st.success("Files generated. Objective/letter sanitized to avoid union/non-union or sub-trade labels.")
