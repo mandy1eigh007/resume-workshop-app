@@ -1,10 +1,11 @@
-# app.py — Resume Workshop & Pathways (Seattle tri-county, union + open-shop lanes)
-# Single-file Streamlit app. No AI, no API keys. Works with your DOCX resume template.
-# Features:
-# - Workshop intake → resume (docxtpl) + cover letter (python-docx) + instructor packet (full-text of uploads)
-# - Trade picker (guidebook order + Lineman), Boost Plan panel per trade (certs, hold-over jobs, pipelines)
-# - JD upload parsing (PDF/DOCX/TXT), conservative text cleanup/normalization
-# - Neutral objective/letter language (no union/non-union/inside-wire/etc.)
+# app.py — Resume Workshop & Pathways (Seattle Tri-County)
+# Single-file Streamlit app. No APIs. Uses your DOCX template to build a resume.
+# What this does:
+#  - Step 0: Intake of prior resume, job descriptions (files/URLs), and pasted text
+#  - Steps 1–9: Full "Student Packet: Resume Workshop" flow (exact workshop wording)
+#  - Keyword mining from uploads/paste → suggested transferable skills + seed bullets
+#  - Builds Resume (docxtpl), Cover Letter (python-docx), and Instructor Packet (full text of uploads)
+#  - Neutral objective language (no union/non-union/inside-wire/low-voltage labels)
 
 from __future__ import annotations
 import io, os, re, csv, datetime
@@ -13,16 +14,16 @@ from typing import List, Dict, Any
 
 import streamlit as st
 import pandas as pd
-
 from docxtpl import DocxTemplate
 from docx import Document as DocxWriter
 from docx.shared import Pt
 from pypdf import PdfReader
+import requests
 
 st.set_page_config(page_title="Resume Workshop & Pathways", layout="wide")
 
 # ─────────────────────────────────────────────────────────
-# Guardrails & cleanup
+# Small helpers & cleanup
 # ─────────────────────────────────────────────────────────
 MAX_SUMMARY_CHARS = 450
 MAX_SKILLS = 12
@@ -36,7 +37,6 @@ BANNED_TERMS = [
     r"\binside\s+wire(man|men)?\b", r"\blow[-\s]?voltage\b", r"\bsound\s+and\s+communication(s)?\b"
 ]
 BANNED_RE = re.compile("|".join(BANNED_TERMS), re.I)
-
 FILLER_LEADS = re.compile(r"^\s*(responsible for|duties included|tasked with|in charge of)\s*:?\s*", re.I)
 MULTISPACE = re.compile(r"\s+")
 PHONE_DIGITS = re.compile(r"\D+")
@@ -80,7 +80,65 @@ def parse_dates(raw: str) -> tuple[str,str]:
     return (raw,"") if raw else ("","")
 
 # ─────────────────────────────────────────────────────────
-# Skills canon & synonyms (conservative)
+# File text extraction & public URL fetch
+# ─────────────────────────────────────────────────────────
+def extract_text_from_pdf(file) -> str:
+    try:
+        reader = PdfReader(file); chunks=[]
+        for p in reader.pages:
+            txt = p.extract_text() or ""
+            chunks.append(txt)
+        return "\n".join(chunks)
+    except Exception:
+        return ""
+
+def extract_text_from_docx(file) -> str:
+    try:
+        from docx import Document as DocxReader
+        doc = DocxReader(file)
+        return "\n".join([p.text for p in doc.paragraphs])
+    except Exception:
+        return ""
+
+def extract_text_generic(upload) -> str:
+    name = getattr(upload, "name", "").lower()
+    if name.endswith(".pdf"): return extract_text_from_pdf(upload)
+    if name.endswith(".docx"): return extract_text_from_docx(upload)
+    try:
+        return upload.getvalue().decode("utf-8", errors="ignore")
+    except Exception:
+        return ""
+
+class NamedBytesIO(io.BytesIO):
+    def __init__(self, data: bytes, name: str):
+        super().__init__(data)
+        self.name = name
+
+def _drive_direct(url: str) -> str:
+    # Convert Google Drive share links to direct-download
+    m = re.search(r"/d/([a-zA-Z0-9_-]+)", url) or re.search(r"[?&]id=([a-zA-Z0-9_-]+)", url)
+    if m:
+        file_id = m.group(1)
+        return f"https://drive.google.com/uc?export=download&id={file_id}"
+    return url
+
+def fetch_url_to_named_bytes(url: str, fallback_name: str = "downloaded_file") -> NamedBytesIO | None:
+    try:
+        u = _drive_direct(url.strip())
+        r = requests.get(u, timeout=30)
+        r.raise_for_status()
+        name = (url.split("?")[0].rstrip("/").split("/")[-1] or fallback_name)
+        if "." not in name:
+            ct = r.headers.get("content-type","").lower()
+            if "pdf" in ct: name += ".pdf"
+            elif "word" in ct or "officedocument" in ct: name += ".docx"
+            else: name += ".txt"
+        return NamedBytesIO(r.content, name)
+    except Exception:
+        return None
+
+# ─────────────────────────────────────────────────────────
+# Skills canon & lightweight keyword mapping (used to pre-fill)
 # ─────────────────────────────────────────────────────────
 SKILL_CANON = [
     "Problem-solving","Critical thinking","Attention to detail","Time management",
@@ -108,39 +166,32 @@ def normalize_skill_label(s: str) -> str:
     if mapped: return mapped
     return re.sub(r"\s+"," ",base).strip().title()
 
-# ─────────────────────────────────────────────────────────
-# File text extraction
-# ─────────────────────────────────────────────────────────
-def extract_text_from_pdf(file) -> str:
-    try:
-        reader = PdfReader(file); chunks=[]
-        for p in reader.pages:
-            txt = p.extract_text() or ""
-            chunks.append(txt)
-        return "\n".join(chunks)
-    except Exception:
-        return ""
-
-def extract_text_from_docx(file) -> str:
-    try:
-        from docx import Document as DocxReader
-        doc = DocxReader(file)
-        return "\n".join([p.text for p in doc.paragraphs])
-    except Exception:
-        return ""
-
-def extract_text_generic(upload) -> str:
-    name = upload.name.lower()
-    if name.endswith(".pdf"): return extract_text_from_pdf(upload)
-    if name.endswith(".docx"): return extract_text_from_docx(upload)
-    try:
-        return upload.getvalue().decode("utf-8", errors="ignore")
-    except Exception:
-        return ""
+TRANSFERABLE_KEYWORDS = {
+    "problem": "Problem-solving", "solve": "Problem-solving", "troubleshoot": "Problem-solving",
+    "analyz": "Critical thinking", "priorit": "Time management", "deadline": "Time management",
+    "detail": "Attention to detail", "team": "Teamwork & collaboration", "collabor": "Teamwork & collaboration",
+    "adapt": "Adaptability & willingness to learn", "learn": "Adaptability & willingness to learn",
+    "safety": "Safety awareness", "osha": "Safety awareness", "customer": "Customer service",
+    "lead": "Leadership", "blueprint": "Reading blueprints & specs", "spec": "Reading blueprints & specs",
+    "tool": "Hand & power tools", "drill": "Hand & power tools", "saw": "Hand & power tools",
+    "forklift": "Materials handling (wood/concrete/metal)", "material": "Materials handling (wood/concrete/metal)",
+    "machin": "Operating machinery", "math": "Trades math & measurement", "measure": "Trades math & measurement",
+    "code": "Regulatory compliance", "permit": "Regulatory compliance", "compliance": "Regulatory compliance",
+    "stamina": "Physical stamina & dexterity", "lift": "Physical stamina & dexterity",
+    "rigging":"Operating machinery", "conduit":"Hand & power tools", "braz":"Hand & power tools",
+}
+def suggest_transferable_skills_from_text(text: str) -> List[str]:
+    hits = {}
+    low = (text or "").lower()
+    for kw, skill in TRANSFERABLE_KEYWORDS.items():
+        if kw in low:
+            hits[skill] = hits.get(skill, 0) + 1
+    ordered = [s for s,_ in sorted(hits.items(), key=lambda kv: -kv[1])]
+    canon_order = [s for s in SKILL_CANON if s in ordered]
+    return canon_order[:8]
 
 # ─────────────────────────────────────────────────────────
-# Trade taxonomy — Seattle guidebook order (+ Lineman)
-# Families used for dropdown. Specialties/Pathways only where it helps routing/boost plan.
+# Trade taxonomy (for objective phrasing)
 # ─────────────────────────────────────────────────────────
 TRADE_TAXONOMY = [
     "Boilermaker (Local 104, 502)",
@@ -167,287 +218,12 @@ TRADE_TAXONOMY = [
     "Roofer (Local 54/153)",
     "Sheet Metal (SMART 66)",
     "Sprinkler Fitter (UA 699)",
-    # Not in book, but required per your instruction:
     "High Voltage – Outside Lineman (NW Line JATC)",
     "Power Line Clearance Tree Trimmer (NW Line JATC)",
 ]
 
 # ─────────────────────────────────────────────────────────
-# Boost plans per trade (concise, app-readable). You can expand text anytime.
-# Keep language neutral (resume objective stays union-agnostic).
-# ─────────────────────────────────────────────────────────
-BOOST: Dict[str, Dict[str, Any]] = {
-    # pattern for each:
-    # "Trade Name": {
-    #   "certs": [ ... ],
-    #   "hold_over_jobs": [ ... ],
-    #   "pipelines_union": [ ... ],
-    #   "pipelines_open": [ ... ],
-    #   "math": "...",
-    #   "notes": "...",
-    # }
-    "Electrician – Inside (01)": {
-        "certs": [
-            "OSHA-30 (Construction Outreach)",
-            "Clean driving record; valid DL",
-            "Basic hand/power tool proficiency",
-        ],
-        "hold_over_jobs": [
-            "Electrical supplier/material handler",
-            "Solar install helper (under supervision)",
-            "Low-voltage helper (exposure to cabling, terminations)",
-        ],
-        "pipelines_union": [
-            "Puget Sound Electrical JATC (IBEW/NECA) – Inside (01)",
-            "Municipal utility apprenticeships (e.g., Electrician Constructor cycles)",
-        ],
-        "pipelines_open": [
-            "ABC Western Washington – Electrical apprenticeship (01/02/06 routes)",
-            "CITC – Electrical apprenticeship (verify ARTS listing)",
-        ],
-        "math": "Target algebra/geometry, measurement & conversions. Use local ABE/pre-college math for quick ramp.",
-        "notes": "WA requires apprenticeship route for 01 licensing; keep resume objective neutral (no union/non-union labels)."
-    },
-    "Electrician – Limited Energy (06)": {
-        "certs": [
-            "OSHA-30",
-            "Vendor micro-credentials helpful (fire alarm/CCTV/voice-data)",
-        ],
-        "hold_over_jobs": [
-            "Security/Fire alarm install helper",
-            "Data cabling tech helper",
-        ],
-        "pipelines_union": [
-            "PSEJATC – Limited Energy (06)",
-        ],
-        "pipelines_open": [
-            "ABC WW – Limited Energy",
-            "CITC – Low-voltage/06",
-        ],
-        "math": "Basic DC concepts, low-voltage color codes, measurement.",
-        "notes": "Keep objective neutral; do not say 'low-voltage' in the summary line."
-    },
-    "Electrician – Residential (02)": {
-        "certs": ["OSHA-30"],
-        "hold_over_jobs": ["Residential electrical helper", "Warehouse/parts runner"],
-        "pipelines_union": ["PSEJATC – Residential (02)"],
-        "pipelines_open": ["ABC WW – Residential", "CITC – Residential"],
-        "math": "Algebra, measurement, basic circuits.",
-        "notes": "Neutral objective."
-    },
-    "High Voltage – Outside Lineman (NW Line JATC)": {
-        "certs": [
-            "CDL-B (work toward CDL-A)",
-            "OSHA-30",
-            "First Aid/CPR (site standard)",
-        ],
-        "hold_over_jobs": [
-            "Groundman with line contractors",
-            "Traffic control (Flagger) on line projects",
-            "Yard/utility material handler",
-        ],
-        "pipelines_union": [
-            "NW Line JATC – Outside Lineman (regional)",
-            "Seattle City Light – PAL → Line apprenticeship cycles",
-        ],
-        "pipelines_open": [
-            "Direct-hire trainee roles with merit-shop line contractors (confirm job is legitimate; ARTS if they claim 'apprenticeship')"
-        ],
-        "math": "Strong arithmetic, ratios, mechanical reasoning; prep for CAST-style testing.",
-        "notes": "Be climbing/fitness ready; travel likely. Keep resume objective neutral."
-    },
-    "Power Line Clearance Tree Trimmer (NW Line JATC)": {
-        "certs": [
-            "CDL-B permit early",
-            "Intro to Arboriculture Safety (free micro-course)",
-            "Pesticide study prep (WSU/WSDA manuals) if vegetation mgmt applies",
-        ],
-        "hold_over_jobs": [
-            "Vegetation management groundworker",
-            "Traffic control",
-            "Yard/material staging for line crews",
-        ],
-        "pipelines_union": [
-            "NW Line JATC – Tree Trimmer (year-round application; monthly ranking)"
-        ],
-        "pipelines_open": [
-            "Direct-hire vegetation management companies; verify training & safety standards"
-        ],
-        "math": "Measurement & rigging ratios basics.",
-        "notes": "Resume objective stays neutral; tree/line proximity work emphasizes safety and comms."
-    },
-    "Carpenter (General)": {
-        "certs": ["OSHA-30", "Employer forklift eval on hire"],
-        "hold_over_jobs": ["Framing helper", "Concrete formwork helper", "Warehouse/tool crib"],
-        "pipelines_union": ["Western States Carpenters – JATC (regional)"],
-        "pipelines_open": ["CITC – Carpentry"],
-        "math": "Fractions, angles, layout (rise/run).",
-        "notes": "Add rigging/fall-protection awareness modules where possible."
-    },
-    "Carpenter – Interior Systems": {
-        "certs": ["OSHA-30", "MEWP (employer eval on hire)"],
-        "hold_over_jobs": ["Drywall stocking/board hanger helper", "Acoustical ceiling install helper"],
-        "pipelines_union": ["Western States Carpenters – Interior Systems"],
-        "pipelines_open": ["CITC – Carpentry/Scaffold Erector"],
-        "math": "Tape measure fluency, layout.",
-        "notes": "ICRA (healthcare) awareness helps."
-    },
-    "Millwright": {
-        "certs": ["OSHA-30"],
-        "hold_over_jobs": ["Industrial maintenance helper", "Fabrication shop helper"],
-        "pipelines_union": ["Carpenters/Millwright JATC"],
-        "pipelines_open": ["Check ARTS for open-shop millwright sponsors"],
-        "math": "Precision measurement.",
-        "notes": "Welding/rigger basics stand out."
-    },
-    "Pile Driver": {
-        "certs": ["OSHA-30", "MEWP (employer eval on hire)"],
-        "hold_over_jobs": ["Marine yard helper", "Concrete/bridge prep"],
-        "pipelines_union": ["Pile Drivers – UBC"],
-        "pipelines_open": ["ARTS search for open-shop marine/pile apprenticeships"],
-        "math": "Rigging angles, load basics.",
-        "notes": "Water work readiness and fitness."
-    },
-    "Cement Mason (OPCMIA 528)": {
-        "certs": ["OSHA-30"],
-        "hold_over_jobs": ["Concrete placement/labor"],
-        "pipelines_union": ["OPCMIA 528 apprenticeship"],
-        "pipelines_open": ["ARTS check for cement mason open-shop sponsors"],
-        "math": "Measurement, slopes/grades.",
-        "notes": "Early morning starts; weather-ready."
-    },
-    "Drywall Finisher (IUPAT)": {
-        "certs": ["OSHA-30", "MEWP (employer eval)"],
-        "hold_over_jobs": ["Finisher helper", "Paint prep"],
-        "pipelines_union": ["IUPAT finishing apprenticeship"],
-        "pipelines_open": ["CITC – Painting (finish path)"],
-        "math": "Measurement, batch ratios.",
-        "notes": "Dust control & PPE habits."
-    },
-    "Elevator Constructor (IUEC/NEIEP)": {
-        "certs": ["OSHA-30"],
-        "hold_over_jobs": ["Mechanical/electrical helper roles, facilities maintenance"],
-        "pipelines_union": ["NEIEP/Local 19 opportunities portal"],
-        "pipelines_open": ["Rare open-shop; verify in ARTS if claimed"],
-        "math": "Algebra/trig basics; precision layout.",
-        "notes": "Customer-facing professionalism matters."
-    },
-    "Ironworker (Local 86)": {
-        "certs": ["OSHA-30"],
-        "hold_over_jobs": ["Rebar placing helper", "Fab shop helper"],
-        "pipelines_union": ["Ironworkers Local 86 apprenticeship"],
-        "pipelines_open": ["Check ARTS for open-shop ironworker/rebar sponsors"],
-        "math": "Fractions, angles, reading simple details.",
-        "notes": "Working at heights; fitness."
-    },
-    "Laborer (LIUNA 242/252/292)": {
-        "certs": ["OSHA-30", "Flagger → Traffic Control Supervisor after hours"],
-        "hold_over_jobs": ["TC/Flagging crews", "General site labor", "Erosion control"],
-        "pipelines_union": ["Laborers JATC (by local)"],
-        "pipelines_open": ["CITC – Construction Craft Laborer"],
-        "math": "Basic measurement & production math.",
-        "notes": "Great entry while ranking elsewhere."
-    },
-    "Operating Engineer (IUOE 302/612)": {
-        "certs": ["OSHA-30", "CDL-A path helpful"],
-        "hold_over_jobs": ["Equipment yard helper", "Civil labor with grading crews"],
-        "pipelines_union": ["IUOE 302/612 apprenticeship"],
-        "pipelines_open": ["CITC – Heavy Equipment Operator (if listed)"],
-        "math": "Grade math, production math.",
-        "notes": "Expect travel and outdoor work."
-    },
-    "Painter (IUPAT DC5)": {
-        "certs": ["OSHA-30", "MEWP (employer eval)"],
-        "hold_over_jobs": ["Prep/labor, warehouse tinting"],
-        "pipelines_union": ["IUPAT DC5 – Painter"],
-        "pipelines_open": ["CITC – Painting"],
-        "math": "Ratios for mixing, coverage math.",
-        "notes": "Customer-facing; finish quality."
-    },
-    "Plasterer (OPCMIA 528)": {
-        "certs": ["OSHA-30"],
-        "hold_over_jobs": ["Stucco/lath helper"],
-        "pipelines_union": ["OPCMIA 528"],
-        "pipelines_open": ["ARTS for open-shop plaster pathways"],
-        "math": "Measurement, ratios.",
-        "notes": "Exterior/weather work."
-    },
-    "Plumber / Steamfitter / HVAC-R (UA 32 / UA 26)": {
-        "certs": ["EPA 608 (Universal)", "OSHA-30"],
-        "hold_over_jobs": ["HVAC helper", "Plumbing warehouse/runner", "Sheet-metal shop helper"],
-        "pipelines_union": ["UA 32/SAPT (King)", "UA 26 (Pierce/Snohomish)"],
-        "pipelines_open": ["CITC – Plumbing/HVAC (verify ARTS listing)"],
-        "math": "Fractions, pressure/temp basics, measurement.",
-        "notes": "Service roles need DL/MVR; brazing helps."
-    },
-    "Roofer (Local 54/153)": {
-        "certs": ["OSHA-30", "MEWP employer eval"],
-        "hold_over_jobs": ["Roof tear-off/prep", "Materials hoisting"],
-        "pipelines_union": ["Roofers Local 54 (King/Snohomish), 153 (Pierce)"],
-        "pipelines_open": ["ARTS for open-shop roofing sponsors"],
-        "math": "Squares/coverage math.",
-        "notes": "Heights & weather stamina."
-    },
-    "Sheet Metal (SMART 66)": {
-        "certs": ["OSHA-30", "EPA 608 for service track"],
-        "hold_over_jobs": ["Duct shop helper", "Install helper"],
-        "pipelines_union": ["SMART 66 JATC (fabrication/install/service/TAB)"],
-        "pipelines_open": ["CITC – Sheet Metal"],
-        "math": "Layout, measurement, basic geometry.",
-        "notes": "Controls/service cross with electrical rules—keep objective neutral."
-    },
-    "Sprinkler Fitter (UA 699)": {
-        "certs": ["OSHA-30"],
-        "hold_over_jobs": ["Fire protection install helper", "Warehouse/pipe prep"],
-        "pipelines_union": ["UA 699 – Sprinkler Fitter"],
-        "pipelines_open": ["ARTS for open-shop sprinkler apprenticeships"],
-        "math": "Measurement, prints reading basics.",
-        "notes": "NICET later is valuable."
-    },
-    "Boilermaker (Local 104, 502)": {
-        "certs": ["OSHA-30"],
-        "hold_over_jobs": ["Shop fabrication helper", "Welder’s helper"],
-        "pipelines_union": ["IBB Local 104 / 502"],
-        "pipelines_open": ["ARTS for shop-based boilermaker/fab apprenticeships"],
-        "math": "Blueprint basics, measurement.",
-        "notes": "Welding certs make you stand out."
-    },
-    "Bricklayer / BAC Allied (Brick/Tile/Terrazzo/Marble/PCC)": {
-        "certs": ["OSHA-30"],
-        "hold_over_jobs": ["Masonry laborer", "Tile setter helper"],
-        "pipelines_union": ["BAC 1 WA/AK"],
-        "pipelines_open": ["ARTS for open-shop masonry/tile"],
-        "math": "Layout, coverage math.",
-        "notes": "Back/ergonomics awareness."
-    },
-    "Floor Layer (IUPAT)": {
-        "certs": ["OSHA-30"],
-        "hold_over_jobs": ["Flooring install helper", "Warehouse/tint"],
-        "pipelines_union": ["IUPAT Floor Layers"],
-        "pipelines_open": ["ARTS for open-shop floor covering"],
-        "math": "Coverage & takeoff math.",
-        "notes": "Customer-facing install work."
-    },
-    "Glazier (IUPAT 188)": {
-        "certs": ["OSHA-30", "MEWP employer eval"],
-        "hold_over_jobs": ["Glass shop helper", "Install helper"],
-        "pipelines_union": ["Glaziers Local 188"],
-        "pipelines_open": ["CITC – Glazier"],
-        "math": "Measurement/reading shop drawings.",
-        "notes": "Handling glass safely is key."
-    },
-    "Heat & Frost Insulator (Local 7)": {
-        "certs": ["OSHA-30"],
-        "hold_over_jobs": ["Mechanical insulation helper"],
-        "pipelines_union": ["Local 7 – Insulators"],
-        "pipelines_open": ["ARTS for open-shop insulation"],
-        "math": "Measurement, layout.",
-        "notes": "Industrial/jobsite PPE focus."
-    },
-}
-
-# ─────────────────────────────────────────────────────────
-# JD → hint bullets by trade (lightweight heuristics)
+# JD → hint bullets by trade (heuristic)
 # ─────────────────────────────────────────────────────────
 TRADE_HINTS = {
     "High Voltage – Outside Lineman (NW Line JATC)": {
@@ -475,7 +251,6 @@ TRADE_HINTS = {
         "hvac":"Handled materials and maintained clean, safe work zones",
     },
 }
-
 def suggest_bullets(text: str, trade: str) -> List[str]:
     low = (text or "").lower()
     hints = TRADE_HINTS.get(trade, {})
@@ -618,7 +393,7 @@ def build_cover_letter_docx(data: Dict[str,str]) -> bytes:
     bio = io.BytesIO(); doc.save(bio); bio.seek(0)
     return bio.getvalue()
 
-def build_pathway_packet_docx(student: Dict[str,str], trade_label: str, app_type: str, sources: List[Any]) -> bytes:
+def build_pathway_packet_docx(student: Dict[str,str], trade_label: str, app_type: str, sources: List[Any], reflections: Dict[str,str]) -> bytes:
     doc = DocxWriter()
     styles = doc.styles['Normal']; styles.font.name = 'Calibri'; styles.font.size = Pt(11)
 
@@ -626,9 +401,17 @@ def build_pathway_packet_docx(student: Dict[str,str], trade_label: str, app_type
     meta = f"Student: {student.get('name','')} | Target: {trade_label} | Application type: {app_type}"
     doc.add_paragraph(meta); doc.add_paragraph("")
 
+    # Include Workshop reflections verbatim (no summarizing)
+    doc.add_heading("Workshop Reflections", level=1)
+    for k,v in reflections.items():
+        doc.add_paragraph(k+":")
+        for line in (v or "").splitlines():
+            doc.add_paragraph(line)
+
+    # Include the full text of uploaded/imported docs
     for upl in sources or []:
         doc.add_page_break()
-        doc.add_heading(upl.name, level=1)
+        doc.add_heading(getattr(upl,"name","(file)"), level=1)
         text = extract_text_generic(upl)
         if text.strip():
             for line in text.splitlines():
@@ -640,7 +423,7 @@ def build_pathway_packet_docx(student: Dict[str,str], trade_label: str, app_type
     return out.getvalue()
 
 # ─────────────────────────────────────────────────────────
-# Sidebar — template & docs
+# Sidebar — template & optional instructor docs
 # ─────────────────────────────────────────────────────────
 with st.sidebar:
     st.header("Templates & Docs")
@@ -652,165 +435,257 @@ with st.sidebar:
     if upl_tpl is not None: tpl_bytes = upl_tpl.read()
 
     st.markdown("---")
-    st.caption("Upload pathway/source docs (PDF/DOCX/TXT). Full text is embedded in the Instructor Packet.")
+    st.caption("Upload additional instructor/pathway docs (PDF/DOCX/TXT). These get embedded (full text) in the Instructor Packet.")
     pathway_uploads = st.file_uploader("Upload pathway documents", type=["pdf","docx","txt"], accept_multiple_files=True)
 
 # ─────────────────────────────────────────────────────────
-# Main UI — Workshop
+# Main — Step 0: Bring Your Stuff (uploads/URLs/paste)
 # ─────────────────────────────────────────────────────────
-st.title("Resume Workshop & Pathways (Seattle Tri-County)")
+st.title("Student Packet: Resume Workshop")
 
-# 1) Target trade + application type
-st.subheader("1) Target Trade & Application Type")
-c1, c2 = st.columns([1,2])
+st.subheader("0) Bring Your Stuff (we’ll mine it)")
+c0a, c0b = st.columns(2)
+with c0a:
+    prev_resume_files = st.file_uploader(
+        "Previous resume (PDF/DOCX/TXT)", type=["pdf","docx","txt"], accept_multiple_files=True
+    )
+with c0b:
+    jd_files = st.file_uploader(
+        "Job descriptions / postings (PDF/DOCX/TXT)", type=["pdf","docx","txt"], accept_multiple_files=True
+    )
+
+st.markdown("**Or import by URL (public links only: Google Drive Share or public GCS):**")
+url_list = st.text_area("One URL per line", "")
+url_fetches = []
+if url_list.strip():
+    for i, raw in enumerate(url_list.splitlines(), start=1):
+        u = raw.strip()
+        if not u: continue
+        nb = fetch_url_to_named_bytes(u, fallback_name=f"url_{i}")
+        if nb is not None:
+            url_fetches.append(nb)
+        else:
+            st.warning(f"Could not fetch: {u} (is it public?)")
+
+st.markdown("**Or paste text directly:**")
+paste_box = st.text_area("Paste any job description text here", "")
+
+def extract_multi(files) -> str:
+    txt = ""
+    for f in files or []:
+        txt += "\n" + extract_text_generic(f)
+    return txt
+
+prev_resume_text = extract_multi(prev_resume_files)
+jd_text_files = extract_multi(jd_files) + extract_multi(url_fetches)
+jd_text_paste = paste_box or ""
+combined_text = "\n".join([prev_resume_text, jd_text_files, jd_text_paste]).strip()
+
+if combined_text:
+    st.caption(f"Loaded text from {len(prev_resume_files or [])} resume file(s), "
+               f"{len(jd_files or []) + len(url_fetches)} JD file(s)/URL(s), "
+               f"and {'pasted text' if jd_text_paste else 'no pasted text'}.")
+    preview = combined_text[:800].replace("\n"," ")
+    st.info(f"Preview: {preview}…")
+
+# ─────────────────────────────────────────────────────────
+# Step 1: What is the Difference… (+ reflection #1)
+# ─────────────────────────────────────────────────────────
+st.subheader("What is the Difference Between a Construction Facing Resume and a Traditional Resume?")
+st.markdown("""
+**Construction Facing Resume**  
+• **Purpose:** Designed specifically for getting into a trade, apprenticeship, or construction company.  
+• **Focus:**  
+  - Highlights hands-on skills (tools, materials).  
+  - Includes certifications like OSHA-10, Forklift, Flagger, CPR.  
+  - Shows physical abilities (lifting, standing, operating equipment).  
+  - Lists projects/build experiences (tiny houses, ACE stations, shop builds).  
+  - Speaks the language of trades (framing, layout, demo, site prep).  
+• **Experience:** Translate non-construction jobs to construction skills (teamwork, time management, safety).
+
+**Traditional Resume**  
+• **Purpose:** Office/retail/service roles.  
+• **Focus:** Education and past jobs first; general soft skills; rarely lists certs/physical abilities/build projects.
+
+**Key Takeaway:** When applying to construction, **show what you can build, operate, or handle on a site**. Prove safety and apprentice-style work habits.
+""")
+wk_q1 = st.text_area("Write down three things you will include on your construction facing resume that you would not include on a traditional resume:", height=120)
+
+# ─────────────────────────────────────────────────────────
+# Step 2: Why a Resume Matters (+ 10-second pitch)
+# ─────────────────────────────────────────────────────────
+st.subheader("1. Why a Resume Matters in Construction")
+st.markdown("A resume is your first impression for unions, contractors, and apprenticeships. It shows you are ready to work safely, use tools, and be a dependable team member.")
+wk_pitch = st.text_area("Write what you want an employer to know about you in 10 seconds:", height=120)
+
+# ─────────────────────────────────────────────────────────
+# Step 3: Header (Contact Information)
+# ─────────────────────────────────────────────────────────
+st.subheader("2. Your Header (Contact Information)")
+c1, c2 = st.columns(2)
 with c1:
-    application_type = st.radio("Applying for:", ["Apprenticeship","Job"], index=0, horizontal=True)
+    Name = st.text_input("Name","")
+    Phone = st.text_input("Phone","")
+    Email = st.text_input("Email","")
 with c2:
-    trade = st.selectbox("Trade (guidebook order + lineman):", TRADE_TAXONOMY, index=TRADE_TAXONOMY.index("Electrician – Inside (01)"))
-
-# 2) Boost Plan (read-only guidance per trade)
-st.subheader("2) Boost Plan (Do these to stand out)")
-bp = BOOST.get(trade, {})
-if not bp:
-    st.info("Select a trade to view its Boost Plan.")
-else:
-    a,b = st.columns(2)
-    with a:
-        st.markdown("**Certifications / Prep**")
-        for x in bp.get("certs", []): st.write(f"- {x}")
-        st.markdown("**Hold-over Jobs (while you apply/rank)**")
-        for x in bp.get("hold_over_jobs", []): st.write(f"- {x}")
-        st.markdown("**Math / Study Focus**")
-        st.write(bp.get("math",""))
-    with b:
-        st.markdown("**Pipelines — Union**")
-        for x in bp.get("pipelines_union", []): st.write(f"- {x}")
-        st.markdown("**Pipelines — Open-shop**")
-        for x in bp.get("pipelines_open", []): st.write(f"- {x}")
-        st.markdown("**Notes**")
-        st.write(bp.get("notes",""))
-
-# 3) Upload job descriptions/postings (optional)
-st.subheader("3) Upload Job Descriptions / Postings (optional)")
-uploads = st.file_uploader("Upload one or more files (PDF/DOCX/TXT). We’ll mine light hints.", type=["pdf","docx","txt"], accept_multiple_files=True)
-jd_text = ""
-if uploads:
-    for f in uploads:
-        jd_text += "\n" + extract_text_generic(f)
-
-# 4) Contact & objective
-with st.form("workshop"):
-    st.subheader("4) Contact & Objective")
-    c1, c2 = st.columns(2)
-    with c1:
-        Name = st.text_input("Name","")
-        City = st.text_input("City","")
-        State = st.text_input("State (2-letter)","")
-        Phone = st.text_input("Phone","")
-        Email = st.text_input("Email","")
-    with c2:
-        default_role = f"{trade} pre-apprentice" if application_type=="Apprenticeship" else f"Entry-level {trade}"
-        Obj_Seeking = st.text_input("Target role (neutral wording):", default_role)
-        Obj_Quality = st.text_input("One strength to highlight:", "safety mindset")
-        Objective_Final = st.text_area("Final objective (1–2 sentences):",
-            "I’m seeking hands-on experience as an entry-level contributor in construction, bringing a safety mindset, reliability, and readiness to learn.")
-
-    # 5) Skills
-    st.subheader("5) Skills")
-    quick_transfer = st.multiselect("Quick add transferable skills:", SKILL_CANON, default=[])
-    Skills_Transferable = st.text_area("Transferable Skills (comma/newline):","")
-    Skills_JobSpecific = st.text_area("Job-Specific Skills (comma/newline):","")
-    Skills_SelfManagement = st.text_area("Self-Management Skills (comma/newline):","")
-
-    # 6) Work Experience
-    st.subheader("6) Work Experience (up to 3)")
-    job_blocks=[]
-    jd_defaults = suggest_bullets(jd_text, trade) if jd_text else []
-    for idx in range(1, MAX_JOBS+1):
-        st.markdown(f"**Job {idx}**")
-        j1,j2 = st.columns(2)
-        with j1:
-            JobCompany = st.text_input(f"Job {idx} – Company:", key=f"J{idx}c")
-            JobCitySt  = st.text_input(f"Job {idx} – City/State:", key=f"J{idx}cs")
-            JobDates   = st.text_input(f"Job {idx} – Dates (e.g., 2023-06 – 2024-05 or Present):", key=f"J{idx}d")
-        with j2:
-            JobTitle   = st.text_input(f"Job {idx} – Title:", key=f"J{idx}t")
-            placeholder = "One per line, e.g., Assisted with conduit layout\nUsed PPE and kept work zone clean"
-            defaults = "\n".join(jd_defaults) if (idx==1 and jd_defaults) else ""
-            JobDuties  = st.text_area(f"Job {idx} – Duties/Accomplishments (1–4 bullets):", key=f"J{idx}du", value=defaults, placeholder=placeholder)
-        job_blocks.append((JobCompany, JobCitySt, JobDates, JobTitle, JobDuties))
-
-    # 7) Certifications
-    st.subheader("7) Certifications")
-    default_certs = "OSHA-10, Flagger (WA), Forklift operator (employer eval required on hire)"
-    Certifications = st.text_area("List certifications (comma/newline).", default_certs)
-
-    # 8) Education
-    st.subheader("8) Education (up to 2)")
-    edu_blocks=[]
-    for idx in range(1, MAX_SCHOOLS+1):
-        st.markdown(f"**School/Program {idx}**")
-        ESchool = st.text_input(f"School/Program {idx}:", key=f"E{idx}s")
-        ECitySt = st.text_input(f"City/State {idx}:", key=f"E{idx}cs")
-        EDates  = st.text_input(f"Dates {idx}:", key=f"E{idx}d")
-        ECred   = st.text_input(f"Certificate/Diploma {idx}:", key=f"E{idx}c")
-        edu_blocks.append((ESchool, ECitySt, EDates, ECred))
-
-    # 9) Optional
-    st.subheader("9) Optional")
-    Other_Work = st.text_area("Other Work Experience (optional):","")
-    Volunteer  = st.text_area("Volunteer Experience (optional):","")
-
-    # 10) Cover Letter
-    st.subheader("10) Cover Letter")
-    CL_Company = st.text_input("Company/Employer (for the letter):","")
-    CL_Role    = st.text_input("Role Title (for the letter):", default_role)
-    CL_Location= st.text_input("Company Location (City, State):","")
-    CL_Highlights = st.text_area("Optional: bullet highlights (comma/newline):","Reliable • Safety-focused • Coachable")
-
-    submitted = st.form_submit_button("Generate Resume + Cover Letter + Instructor Packet", type="primary")
+    City = st.text_input("City","")
+    State = st.text_input("State (2-letter)", "")
 
 # ─────────────────────────────────────────────────────────
-# Build → Export
+# Step 4: Writing Your Objective
 # ─────────────────────────────────────────────────────────
-if submitted:
+st.subheader("3. Writing Your Objective")
+c3a, c3b = st.columns(2)
+with c3a:
+    application_type = st.radio("Are you seeking a job or apprenticeship?", ["Apprenticeship","Job"], horizontal=True, index=0)
+    trade = st.selectbox("What trade are you aiming for?", TRADE_TAXONOMY, index=TRADE_TAXONOMY.index("Electrician – Inside (01)"))
+with c3b:
+    wk_obj_seek = st.text_input("What job/apprenticeship are you seeking?", f"{trade}")
+    wk_obj_quality = st.text_input("One skill or quality to highlight:", "safety mindset")
+
+default_role = f"{trade} pre-apprentice" if application_type=="Apprenticeship" else f"Entry-level {trade}"
+wk_objective_final = st.text_area("Write your final objective here (1–2 sentences):",
+    f"I’m seeking hands-on experience as an entry-level contributor in {trade}, bringing a {wk_obj_quality}, reliability, and readiness to learn.")
+
+# ─────────────────────────────────────────────────────────
+# Step 5: Your Skills Section
+# ─────────────────────────────────────────────────────────
+st.subheader("4. Your Skills Section")
+st.markdown("List three kinds: **Transferable**, **Job-Specific**, and **Self-Management**.")
+suggested_skills = suggest_transferable_skills_from_text(combined_text)
+quick_transfer = st.multiselect("Quick add transferable skills (suggested from your uploads):",
+                                SKILL_CANON, default=suggested_skills)
+Skills_Transferable = st.text_area("Transferable Skills (comma/newline):","")
+Skills_JobSpecific  = st.text_area("Job-Specific Skills (comma/newline):","")
+Skills_SelfManagement = st.text_area("Self-Management Skills (comma/newline):","")
+
+# ─────────────────────────────────────────────────────────
+# Step 6: Work Experience — Jobs 1–3
+# ─────────────────────────────────────────────────────────
+st.subheader("5. Work Experience – Job 1")
+jd_text = combined_text  # use all sources for hinting
+seed1 = "\n".join(suggest_bullets(jd_text, trade))
+J1c = st.text_input("Job 1 – Company:"); J1cs = st.text_input("Job 1 – City/State:")
+J1d = st.text_input("Job 1 – Dates (e.g., 2023-06 – Present):"); J1t = st.text_input("Job 1 – Title:")
+J1du = st.text_area("Job 1 – Duties/Accomplishments (1–4 bullets):", seed1, height=120)
+
+st.subheader("5. Work Experience – Job 2")
+J2c = st.text_input("Job 2 – Company:"); J2cs = st.text_input("Job 2 – City/State:")
+J2d = st.text_input("Job 2 – Dates:"); J2t = st.text_input("Job 2 – Title:")
+J2du = st.text_area("Job 2 – Duties/Accomplishments (1–4 bullets):", height=120)
+
+st.subheader("5. Work Experience – Job 3")
+J3c = st.text_input("Job 3 – Company:"); J3cs = st.text_input("Job 3 – City/State:")
+J3d = st.text_input("Job 3 – Dates:"); J3t = st.text_input("Job 3 – Title:")
+J3du = st.text_area("Job 3 – Duties/Accomplishments (1–4 bullets):", height=120)
+
+# ─────────────────────────────────────────────────────────
+# Step 7: Certifications
+# ─────────────────────────────────────────────────────────
+st.subheader("6. Certifications")
+Certifications = st.text_area("List any certifications (comma/newline). If none, write 'None yet' or what you plan to get.",
+                              "OSHA-10, Flagger (WA), Forklift operator (employer evaluation on hire)")
+
+# ─────────────────────────────────────────────────────────
+# Step 8: Education (two blocks)
+# ─────────────────────────────────────────────────────────
+st.subheader("7. Education")
+st.markdown("List in reverse order with city/state, dates, and certificate/diploma.")
+E1s = st.text_input("School/Program 1:"); E1cs = st.text_input("City/State 1:")
+E1d = st.text_input("Dates 1:"); E1c = st.text_input("Certificate/Diploma 1:")
+E2s = st.text_input("School/Program 2:"); E2cs = st.text_input("City/State 2:")
+E2d = st.text_input("Dates 2:"); E2c = st.text_input("Certificate/Diploma 2:")
+
+# ─────────────────────────────────────────────────────────
+# Step 9: Optional Sections
+# ─────────────────────────────────────────────────────────
+st.subheader("8. Optional Sections")
+Other_Work = st.text_area("Other Work Experience (optional):","")
+Volunteer  = st.text_area("Volunteer Experience (optional):","")
+
+# ─────────────────────────────────────────────────────────
+# Step 10: Build Your Resume (Draft reflection area)
+# ─────────────────────────────────────────────────────────
+st.subheader("9. Build Your Resume (Draft)")
+wk_draft_header = st.text_area("HEADER (draft, optional):","", height=80)
+wk_draft_objective = st.text_area("OBJECTIVE (draft, optional):","", height=80)
+wk_draft_skills = st.text_area("SKILLS (draft, optional):","", height=120)
+wk_draft_work = st.text_area("WORK EXPERIENCE (draft, optional):","", height=140)
+wk_draft_certs = st.text_area("CERTIFICATIONS (draft, optional):","", height=80)
+wk_draft_edu = st.text_area("EDUCATION (draft, optional):","", height=80)
+
+# ─────────────────────────────────────────────────────────
+# Final Checklist (for display only)
+# ─────────────────────────────────────────────────────────
+st.markdown("**Final Checklist**")
+st.markdown("""
+- [ ] One page only  
+- [ ] Professional font (10–12 pt)  
+- [ ] Saved as PDF  
+- [ ] Reviewed by peer  
+- [ ] Reviewed by instructor  
+""")
+
+# ─────────────────────────────────────────────────────────
+# Cover Letter minimal fields (generated neutral)
+# ─────────────────────────────────────────────────────────
+st.markdown("---")
+st.subheader("Cover Letter (optional)")
+CL_Company = st.text_input("Company/Employer (for the letter):","")
+CL_Role    = st.text_input("Role Title (for the letter):", f"{default_role}")
+CL_Location= st.text_input("Company Location (City, State):","")
+CL_Highlights = st.text_area("Optional: bullet highlights (comma/newline):","Reliable • Safety-focused • Coachable")
+
+# ─────────────────────────────────────────────────────────
+# Submit + Build
+# ─────────────────────────────────────────────────────────
+if st.button("Generate Resume + Cover Letter + Instructor Packet", type="primary"):
     problems=[]
     if not Name.strip(): problems.append("Name is required.")
     if not (Phone.strip() or Email.strip()): problems.append("At least one contact method (Phone or Email) is required.")
-    if Objective_Final.strip()=="": problems.append("Objective (final) is required.")
+    if wk_objective_final.strip()=="": problems.append("Objective is required.")
     if problems:
-        st.error(" | ".join(problems)); st.stop()
+        st.error(" | ".join(problems))
+        st.stop()
 
-    # Merge quick-adds
+    # Merge quick-add transferable skills into the field
+    skills_transfer_final = Skills_Transferable
     if quick_transfer:
-        Skills_Transferable = (Skills_Transferable + (", " if Skills_Transferable.strip() else "") + ", ".join(quick_transfer))
+        skills_transfer_final = (Skills_Transferable + (", " if Skills_Transferable.strip() else "") + ", ".join(quick_transfer))
 
-    # Intake dict
+    # Build intake form dict
     form = {
         "Name": Name, "City": City, "State": State,
         "Phone": Phone, "Email": Email,
-        "Objective_Seeking": Obj_Seeking, "Objective_Quality": Obj_Quality,
-        "Objective_Final": Objective_Final,
-        "Skills_Transferable": Skills_Transferable,
+        "Objective_Seeking": wk_obj_seek, "Objective_Quality": wk_obj_quality,
+        "Objective_Final": wk_objective_final,
+        "Skills_Transferable": skills_transfer_final,
         "Skills_JobSpecific": Skills_JobSpecific,
         "Skills_SelfManagement": Skills_SelfManagement,
         "Certifications": Certifications,
         "Other_Work": Other_Work, "Volunteer": Volunteer,
     }
-    for i,(co,cs,d,ti,du) in enumerate(job_blocks, start=1):
+    # Jobs
+    for i,(co,cs,d,ti,du) in enumerate([
+        (J1c,J1cs,J1d,J1t,J1du),
+        (J2c,J2cs,J2d,J2t,J2du),
+        (J3c,J3cs,J3d,J3t,J3du),
+    ], start=1):
         form[f"Job{i}_Company"]=co; form[f"Job{i}_CityState"]=cs; form[f"Job{i}_Dates"]=d
         form[f"Job{i}_Title"]=ti; form[f"Job{i}_Duties"]=du
-    for i,(sch,cs,d,cr) in enumerate(edu_blocks, start=1):
+    # Education
+    for i,(sch,cs,d,cr) in enumerate([
+        (E1s,E1cs,E1d,E1c),
+        (E2s,E2cs,E2d,E2c),
+    ], start=1):
         form[f"Edu{i}_School"]=sch; form[f"Edu{i}_CityState"]=cs; form[f"Edu{i}_Dates"]=d; form[f"Edu{i}_Credential"]=cr
-
-    trade_label = trade
 
     # Resume via template
     if not tpl_bytes:
         st.error("Template not found. Put resume_app_template.docx in the repo or upload it in the sidebar.")
         st.stop()
     try:
-        resume_ctx = build_resume_context(form, trade_label)
+        resume_ctx = build_resume_context(form, trade)
         resume_bytes = render_docx_with_template(tpl_bytes, resume_ctx)
     except Exception as e:
         st.error(f"Resume template rendering failed: {e}")
@@ -820,12 +695,26 @@ if submitted:
     cover_bytes = build_cover_letter_docx({
         "name": Name, "city": City, "state": State, "phone": clean_phone(Phone), "email": clean_email(Email),
         "company": CL_Company, "role": CL_Role, "location": CL_Location,
-        "trade_label": trade_label, "strength": CL_Highlights,
+        "trade_label": trade, "strength": CL_Highlights,
         "application_type": application_type,
     })
 
-    # Instructor Packet (full text)
-    packet_bytes = build_pathway_packet_docx({"name": Name}, trade_label, application_type, pathway_uploads)
+    # Build Instructor Packet (Workshop reflections + full text of docs)
+    reflections = {
+        "Three construction-resume items (vs traditional)": wk_q1,
+        "10-second pitch": wk_pitch,
+        "Draft HEADER": wk_draft_header,
+        "Draft OBJECTIVE": wk_draft_objective,
+        "Draft SKILLS": wk_draft_skills,
+        "Draft WORK EXPERIENCE": wk_draft_work,
+        "Draft CERTIFICATIONS": wk_draft_certs,
+        "Draft EDUCATION": wk_draft_edu,
+    }
+    merged_docs_for_packet = list(pathway_uploads or []) \
+                           + list(prev_resume_files or []) \
+                           + list(jd_files or []) \
+                           + url_fetches
+    packet_bytes = build_pathway_packet_docx({"name": Name}, trade, application_type, merged_docs_for_packet, reflections)
 
     safe_name = (Name or "Student").replace(" ","_")
     st.download_button("Download Resume (DOCX)", data=resume_bytes,
@@ -842,8 +731,9 @@ if submitted:
                        use_container_width=True)
 
     # Intake CSV snapshot
-    buf=io.StringIO(); w=csv.writer(buf); fields=list(form.keys()); w.writerow(fields); w.writerow([form[k] for k in fields])
+    buf=io.StringIO(); w=csv.writer(buf)
+    fields=list(form.keys()); w.writerow(fields); w.writerow([form[k] for k in fields])
     st.download_button("Download Intake CSV", data=buf.getvalue().encode("utf-8"),
                        file_name=f"{safe_name}_Workshop_Intake.csv", mime="text/csv",
                        use_container_width=True)
-    st.success("Files generated. Objective/letter sanitized to avoid union/non-union or sub-trade labels.")
+    st.success("Generated. Objective/letter sanitized to avoid union/non-union or sub-trade labels.")
