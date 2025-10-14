@@ -1,14 +1,14 @@
-# app.py — Resume Workshop → One-Page DOCX (no AI, rule-based polish only)
-# Front-facing UI is the workshop intake. We fill YOUR DOCX template (docxtpl).
-# Style/headers/fonts/colors come 100% from your template.
+# app.py — Resume Workshop → One-Page DOCX (no AI)
+# Front-facing UI mirrors your workshop. Rule-based cleanup. Outputs:
+# - DOCX using your template (docxtpl)
+# - CSV snapshot of the student's intake
 
 from __future__ import annotations
-import io, os, re
+import io, os, re, csv
 from dataclasses import dataclass, asdict
 from typing import List, Dict, Any
 
 import streamlit as st
-import pandas as pd
 from docxtpl import DocxTemplate
 
 st.set_page_config(page_title="Resume Workshop → One-Page DOCX", page_icon=None, layout="wide")
@@ -21,7 +21,7 @@ MAX_JOBS = 3
 MAX_BULLETS_PER_JOB = 4
 MAX_SCHOOLS = 2
 
-# ── Rule-based cleanup (no AI)
+# ── Cleanup (no AI)
 FILLER_LEADS = re.compile(r"^\s*(responsible for|duties included|tasked with|in charge of)\s*:?\s*", re.I)
 MULTISPACE = re.compile(r"\s+")
 PHONE_DIGITS = re.compile(r"\D+")
@@ -31,20 +31,17 @@ def norm_ws(s: str) -> str:
     s = MULTISPACE.sub(" ", s)
     return s
 
-def sentence_case(s: str) -> str:
+def cap_first(s: str) -> str:
     s = norm_ws(s)
-    if not s: return s
-    return s[0].upper() + s[1:]
+    return s[:1].upper() + s[1:] if s else s
 
 def clean_bullet(s: str) -> str:
     s = norm_ws(s)
-    s = FILLER_LEADS.sub("", s)           # drop “responsible for …”
-    s = re.sub(r"\.+$", "", s)            # drop trailing periods
-    if s: s = s[0].upper() + s[1:]        # cap first letter
+    s = FILLER_LEADS.sub("", s)
+    s = re.sub(r"\.+$", "", s)
+    s = cap_first(s)
     words = s.split()
-    if len(words) > 20:                   # keep bullets tight
-        s = " ".join(words[:20])
-    return s
+    return " ".join(words[:20]) if len(words) > 20 else s
 
 def clean_phone(s: str) -> str:
     digits = PHONE_DIGITS.sub("", s or "")
@@ -61,6 +58,15 @@ def split_list(raw: str) -> List[str]:
     if not raw: return []
     parts = [p.strip() for p in re.split(r"[,\n;]+", raw)]
     return [p for p in parts if p]
+
+def parse_dates(raw: str) -> tuple[str, str]:
+    raw = norm_ws(raw)
+    if "–" in raw or "-" in raw:
+        sep = "–" if "–" in raw else "-"
+        bits = [b.strip() for b in raw.split(sep, 1)]
+        if len(bits) == 2:
+            return bits[0], bits[1]
+    return (raw, "") if raw else ("", "")
 
 # ── Data classes
 @dataclass
@@ -80,68 +86,95 @@ class School:
     school: str = ""
     credential: str = ""
     year: str = ""
-    details: str = ""
+    details: str = ""  # City/State or notes
 
 # ── Build context for docxtpl (keys match your template)
 def build_context(form: Dict[str, Any]) -> Dict[str, Any]:
     # Contact
-    Name  = sentence_case(form["Name"])
-    City  = sentence_case(form["City"])
-    State = form["State"].strip().upper()
-    phone = clean_phone(form["phone"])
-    email = clean_email(form["email"])
+    Name  = cap_first(form["Name"])
+    City  = cap_first(form["City"])
+    State = (form["State"] or "").strip().upper()
+    phone = clean_phone(form["Phone"])
+    email = clean_email(form["Email"])
 
-    # Summary
-    summary = norm_ws(form["summary"])[:MAX_SUMMARY_CHARS]
+    # Objective → final box
+    summary = norm_ws(form["Objective_Final"])[:MAX_SUMMARY_CHARS]
 
-    # Lists
-    skills = [norm_ws(s) for s in split_list(form["skills_raw"])][:MAX_SKILLS]
-    certs  = [norm_ws(c) for c in split_list(form["certs_raw"])][:MAX_CERTS]
+    # Skills (merge 3 lists)
+    skills_all = []
+    for raw in (form["Skills_Transferable"], form["Skills_JobSpecific"], form["Skills_SelfManagement"]):
+        skills_all += split_list(raw)
+    skills = [norm_ws(s) for s in skills_all][:MAX_SKILLS]
 
-    # Jobs
+    # Certifications
+    certs = [norm_ws(c) for c in split_list(form["Certifications"] )][:MAX_CERTS]
+
+    # Experience (up to 3)
     jobs: List[Job] = []
-    for i in range(form["job_count"]):
-        bullets = [b for b in form[f"bullets_{i}"].splitlines() if b.strip()]
+    for idx in range(1, 4):
+        company = form.get(f"Job{idx}_Company","")
+        cityst  = form.get(f"Job{idx}_CityState","")
+        dates   = form.get(f"Job{idx}_Dates","")
+        title   = form.get(f"Job{idx}_Title","")
+        duties  = form.get(f"Job{idx}_Duties","")
+        if not any([company, title, duties]):
+            continue
+        start, end = parse_dates(dates)
         j = Job(
-            company=sentence_case(form[f"company_{i}"]),
-            role=sentence_case(form[f"role_{i}"]),
-            city=sentence_case(form[f"city_{i}"]),
-            start=norm_ws(form[f"start_{i}"]),
-            end=norm_ws(form[f"end_{i}"]),
-            bullets=bullets
+            company=cap_first(company),
+            role=cap_first(title),
+            city=cap_first(cityst),
+            start=norm_ws(start),
+            end=norm_ws(end),
+            bullets=[b for b in duties.splitlines() if b.strip()]
         )
         j.trim(MAX_BULLETS_PER_JOB)
         jobs.append(j)
     jobs = jobs[:MAX_JOBS]
 
-    # Schools
+    # Education (up to 2)
     schools: List[School] = []
-    for i in range(form["school_count"]):
-        s = School(
-            school=sentence_case(form[f"school_{i}"]),
-            credential=sentence_case(form[f"cred_{i}"]),
-            year=norm_ws(form[f"year_{i}"]),
-            details=sentence_case(form[f"det_{i}"])
-        )
-        schools.append(s)
+    for idx in range(1, 2+1):
+        sch   = form.get(f"Edu{idx}_School","")
+        citys = form.get(f"Edu{idx}_CityState","")
+        dates = form.get(f"Edu{idx}_Dates","")
+        cred  = form.get(f"Edu{idx}_Credential","")
+        if not any([sch, cred, dates, citys]):
+            continue
+        year = norm_ws(dates)
+        details = cap_first(citys) if citys else ""
+        schools.append(School(
+            school=cap_first(sch),
+            credential=cap_first(cred),
+            year=year,
+            details=details
+        ))
     schools = schools[:MAX_SCHOOLS]
 
-    # Context EXACTLY for your template keys
+    # Optional sections → lightly appended to summary tail
+    other_work = norm_ws(form.get("Other_Work",""))
+    volunteer  = norm_ws(form.get("Volunteer",""))
+    tail_bits = []
+    if other_work: tail_bits.append(f"Other work: {other_work}")
+    if volunteer:  tail_bits.append(f"Volunteer: {volunteer}")
+    if tail_bits:
+        add = "  •  ".join(tail_bits)
+        summary = (summary + " " + add).strip()
+        summary = summary[:MAX_SUMMARY_CHARS]
+
+    # Final context → match your template tokens (including spaced variants)
     ctx = {
         "Name": Name,
-        " City": City,        # keep spaced keys in case the template used them
-        " State": State,
+        " City": City,  "City": City,
+        " State": State,"State": State,
         "phone": phone,
         "email": email,
         "summary": summary,
         "skills": skills,
         "certs": certs,
         "jobs": [asdict(j) for j in jobs if any([j.company, j.role, j.bullets])],
-        "schools": [asdict(s) for s in schools if any([s.school, s.credential])],
+        "schools": [asdict(s) for s in schools if any([s.school, s.credential, s.year, s.details])],
     }
-    # Also provide non-spaced backups so it still works if you fix tokens later.
-    ctx.setdefault("City", City)
-    ctx.setdefault("State", State)
     return ctx
 
 def render_docx(template_bytes: bytes, context: Dict[str, Any]) -> bytes:
@@ -152,134 +185,174 @@ def render_docx(template_bytes: bytes, context: Dict[str, Any]) -> bytes:
     out.seek(0)
     return out.getvalue()
 
-# ── Sidebar — template + quick help
+def intake_to_csv_bytes(form: Dict[str, Any]) -> bytes:
+    # simple one-row CSV so you can keep a local record per student
+    fields = list(form.keys())
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(fields)
+    w.writerow([form[k] for k in fields])
+    return buf.getvalue().encode("utf-8")
+
+# ── Sidebar — template
 with st.sidebar:
     st.header("Template")
-    st.caption("By default this loads resume_app_template.docx from the repo. You can upload a different DOCX.")
+    st.caption("Loads resume_app_template.docx from the repo by default. You can upload a different DOCX.")
     tpl_bytes = None
-    default_path = "resume_app_template.docx"
-    if os.path.exists(default_path):
-        with open(default_path, "rb") as f:
+    if os.path.exists("resume_app_template.docx"):
+        with open("resume_app_template.docx","rb") as f:
             tpl_bytes = f.read()
-    uploaded = st.file_uploader("Upload DOCX template (optional)", type=["docx"])
-    if uploaded is not None:
-        tpl_bytes = uploaded.read()
+    upl = st.file_uploader("Upload DOCX template (optional)", type=["docx"])
+    if upl is not None:
+        tpl_bytes = upl.read()
 
-    st.markdown("---")
-    st.write("**Template keys expected** (docxtpl/Jinja):")
-    st.code(
-        """{{Name}}, {{ City }}, {{ State }}, {{ phone }}, {{ email }}
-{{ summary }}
-{% for s in skills %}• {{ s }}{% endfor %}
-{% for c in certs %}• {{ c }}{% endfor %}
-
-{% for job in jobs %}
-  {{ job.company }} — {{ job.role }}  ({{ job.start }} – {{ job.end }})
-  {{ job.city }}
-  {% for b in job.bullets %}• {{ b }}{% endfor %}
-{% endfor %}
-
-{% for s in schools %}
-  {{ s.school }} — {{ s.credential }} — {{ s.year }}
-  {{ s.details }}
-{% endfor %}""",
-        language="jinja"
-    )
-
-# ── Main — WORKSHOP INTAKE (front-facing)
+# ── Main — WORKSHOP INTAKE (labels mirror the packet)
 st.markdown("# Resume Workshop → One-Page DOCX")
 
 with st.form("workshop"):
-    st.subheader("Contact (from sign-in sheet)")
+    # 2. Header (Contact)
+    st.subheader("2) Your Header (Contact Information)")
     c1, c2 = st.columns(2)
     with c1:
-        Name  = st.text_input("Student full name", "")
-        City  = st.text_input("City", "")
-        State = st.text_input("State (2-letter, e.g., WA)", "")
+        Name = st.text_input("Name:", "")
+        City = st.text_input("City:", "")
+        State = st.text_input("State (2-letter):", "")
     with c2:
-        phone = st.text_input("Phone (digits or any format)", "")
-        email = st.text_input("Email", "")
+        Phone = st.text_input("Phone:", "")
+        Email = st.text_input("Email:", "")
 
-    st.subheader("Objective (what are they aiming for?)")
-    summary = st.text_area("In 3–5 short lines: role, safety mindset, strengths, availability.", "")
+    # 3. Writing Your Objective
+    st.subheader("3) Writing Your Objective")
+    st.caption("Answer the prompts, then write a 1–2 sentence objective.")
+    Obj_Seeking = st.text_input("What job or apprenticeship are you seeking?", "")
+    Obj_Quality = st.text_input("One skill or quality to highlight:", "")
+    Objective_Final = st.text_area("Write your final objective here (1–2 sentences):", "")
 
-    st.subheader("Skills (from whiteboard activity)")
-    skills_raw = st.text_area("List skills (comma or new line). Keep the best ~12.", "")
+    # 4. Your Skills Section
+    st.subheader("4) Your Skills Section")
+    Skills_Transferable = st.text_area("Transferable Skills (at least five):", "")
+    Skills_JobSpecific = st.text_area("Job-Specific Skills (at least five):", "")
+    Skills_SelfManagement = st.text_area("Self-Management Skills (at least five):", "")
 
-    st.subheader("Certifications (cards & training)")
-    certs_raw = st.text_area("Examples: OSHA-10, Flagger, Forklift, First Aid/CPR.", "OSHA-10")
-
-    st.subheader("Experience (jobs, volunteering, crews)")
-    job_count = st.number_input("How many roles to include?", 0, MAX_JOBS, min(MAX_JOBS, 2))
-    jobs_blocks: List[Dict[str, Any]] = []
-    for i in range(int(job_count)):
-        st.markdown(f"**Role {i+1}**")
-        j1, j2 = st.columns([2,2])
+    # 5. Work Experience – Job 1..3
+    st.subheader("5) Work Experience")
+    job_blocks = []
+    for idx in range(1, 4):
+        st.markdown(f"**Job {idx}**")
+        j1, j2 = st.columns(2)
         with j1:
-            company = st.text_input(f"Employer/Project {i+1}", key=f"company_{i}")
-            role    = st.text_input(f"Role/Title {i+1}", key=f"role_{i}")
-            city_j  = st.text_input(f"City/Region {i+1}", key=f"city_{i}")
+            JobCompany = st.text_input(f"Job {idx} – Company:", key=f"J{idx}c")
+            JobCitySt  = st.text_input(f"Job {idx} – City/State:", key=f"J{idx}cs")
+            JobDates   = st.text_input(f"Job {idx} – Dates (e.g., 2023-06 – 2024-05 or Present):", key=f"J{idx}d")
         with j2:
-            start   = st.text_input(f"Start (YYYY-MM or season) {i+1}", key=f"start_{i}")
-            end     = st.text_input(f"End (YYYY-MM or 'Present') {i+1}", key=f"end_{i}")
-        bullets  = st.text_area(f"What did they do? (1–4 bullet lines)", key=f"bullets_{i}",
-                                placeholder="E.g., Set up traffic control; Used PPE; Assisted with concrete forms")
-        jobs_blocks.append({
-            f"company_{i}": company, f"role_{i}": role, f"city_{i}": city_j,
-            f"start_{i}": start, f"end_{i}": end, f"bullets_{i}": bullets
-        })
+            JobTitle   = st.text_input(f"Job {idx} – Title:", key=f"J{idx}t")
+            JobDuties  = st.text_area(f"Job {idx} – Duties/Accomplishments (1–4 bullets, one per line):", key=f"J{idx}du")
+        job_blocks.append((JobCompany, JobCitySt, JobDates, JobTitle, JobDuties))
 
-    st.subheader("Education")
-    school_count = st.number_input("How many schools/certs programs?", 0, MAX_SCHOOLS, min(MAX_SCHOOLS, 1))
-    schools_blocks: List[Dict[str, Any]] = []
-    for i in range(int(school_count)):
-        st.markdown(f"**School/Program {i+1}**")
-        e1, e2 = st.columns([2,1])
-        with e1:
-            school = st.text_input(f"School/Program {i+1}", key=f"school_{i}")
-            cred   = st.text_input(f"Credential (Diploma/GED/Cert) {i+1}", key=f"cred_{i}")
-            det    = st.text_input(f"Details (e.g., ANEW Pre-Apprenticeship)", key=f"det_{i}")
-        with e2:
-            year   = st.text_input(f"Year {i+1}", key=f"year_{i}")
-        schools_blocks.append({f"school_{i}": school, f"cred_{i}": cred, f"det_{i}": det, f"year_{i}:": year})
+    # 6. Certifications
+    st.subheader("6) Certifications")
+    Certifications = st.text_area("List certifications (comma or newline). If none, write 'None yet' or planned:", "OSHA-10")
+
+    # 7. Education
+    st.subheader("7) Education")
+    edu_blocks = []
+    for idx in range(1, 3):
+        st.markdown(f"**School/Program {idx}**")
+        ESchool = st.text_input(f"School/Program {idx}:", key=f"E{idx}s")
+        ECitySt = st.text_input(f"City/State {idx}:", key=f"E{idx}cs")
+        EDates  = st.text_input(f"Dates {idx}:", key=f"E{idx}d")
+        ECred   = st.text_input(f"Certificate/Diploma {idx}:", key=f"E{idx}c")
+        edu_blocks.append((ESchool, ECitySt, EDates, ECred))
+
+    # 8. Optional Sections
+    st.subheader("8) Optional Sections")
+    Other_Work = st.text_area("Other Work Experience (optional):", "")
+    Volunteer  = st.text_area("Volunteer Experience (optional):", "")
 
     submitted = st.form_submit_button("Generate One-Page Resume (DOCX)", type="primary")
 
-# ── Build → Download
+# ── Build → Validate → Download
 if submitted:
-    # load template
-    tpl_bytes = tpl_bytes or (open("resume_app_template.docx","rb").read() if os.path.exists("resume_app_template.docx") else None)
+    # lightweight validation so you don’t hand students a blank header
+    problems = []
+    if not Name.strip(): problems.append("Name is required.")
+    if not (Phone.strip() or Email.strip()): problems.append("At least one contact method (Phone or Email) is required.")
+    if Objective_Final.strip() == "": problems.append("Objective (final) is required.")
+    if problems:
+        st.error(" | ".join(problems))
+        st.stop()
+
     if not tpl_bytes:
-        st.error("Template not found. Put resume_app_template.docx in the repo, or upload one in the sidebar.")
-    else:
-        # collect workshop answers
-        form = {
-            "Name": Name, "City": City, "State": State,
-            "phone": phone, "email": email,
-            "summary": summary,
-            "skills_raw": skills_raw, "certs_raw": certs_raw,
-            "job_count": int(job_count), "school_count": int(school_count),
-        }
-        for d in jobs_blocks: form.update(d)
-        for d in schools_blocks: form.update(d)
+        st.error("Template not found. Put resume_app_template.docx in the repo or upload one in the sidebar.")
+        st.stop()
 
-        # quick counters (helps keep one page)
-        skills_list = split_list(skills_raw)
-        certs_list  = split_list(certs_raw)
-        st.info(f"Counts → Summary: {len(summary)} chars | Skills: {len(skills_list)} | Certs: {len(certs_list)} | Roles: {job_count} | Schools: {school_count}")
+    # collect workshop answers
+    form = {
+        "Name": Name, "City": City, "State": State,
+        "Phone": Phone, "Email": Email,
 
-        # render + download
-        try:
-            ctx = build_context(form)
-            docx_bytes = render_docx(tpl_bytes, ctx)
-            safe_name = (ctx.get("Name") or "Resume").replace(" ", "_")
-            st.download_button(
-                "Download DOCX",
-                data=docx_bytes,
-                file_name=f"{safe_name}_Resume.docx",
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                use_container_width=True
-            )
-            st.success("Generated from your exact template.")
-        except Exception as e:
-            st.error(f"Template rendering failed: {e}")
+        "Objective_Seeking": Obj_Seeking,
+        "Objective_Quality": Obj_Quality,
+        "Objective_Final": Objective_Final,
+
+        "Skills_Transferable": Skills_Transferable,
+        "Skills_JobSpecific": Skills_JobSpecific,
+        "Skills_SelfManagement": Skills_SelfManagement,
+
+        "Certifications": Certifications,
+
+        "Other_Work": Other_Work,
+        "Volunteer": Volunteer,
+    }
+
+    for i, (co, cs, d, ti, du) in enumerate(job_blocks, start=1):
+        form[f"Job{i}_Company"]   = co
+        form[f"Job{i}_CityState"] = cs
+        form[f"Job{i}_Dates"]     = d
+        form[f"Job{i}_Title"]     = ti
+        form[f"Job{i}_Duties"]    = du
+
+    for i, (sch, cs, d, cr) in enumerate(edu_blocks, start=1):
+        form[f"Edu{i}_School"]     = sch
+        form[f"Edu{i}_CityState"]  = cs
+        form[f"Edu{i}_Dates"]      = d
+        form[f"Edu{i}_Credential"] = cr
+
+    # counters (help keep to one page)
+    skills_count = len(split_list(Skills_Transferable) + split_list(Skills_JobSpecific) + split_list(Skills_SelfManagement))
+    certs_count  = len(split_list(Certifications))
+    jobs_count   = sum(1 for i in range(1,4) if form.get(f"Job{i}_Company") or form.get(f"Job{i}_Title"))
+    schools_count= sum(1 for i in range(1,3) if form.get(f"Edu{i}_School") or form.get(f"Edu{i}_Credential"))
+    st.info(f"Counts → Summary: {len(Objective_Final)} chars | Skills: {skills_count} | Certs: {certs_count} | Jobs: {jobs_count} | Schools: {schools_count}")
+
+    # render + download
+    try:
+        ctx = build_context(form)
+        docx_bytes = render_docx(tpl_bytes, ctx)
+        safe_name = (ctx.get("Name") or "Resume").replace(" ", "_")
+
+        # DOCX
+        st.download_button(
+            "Download DOCX",
+            data=docx_bytes,
+            file_name=f"{safe_name}_Resume.docx",
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            use_container_width=True
+        )
+
+        # Intake CSV (one-row)
+        csv_bytes = intake_to_csv_bytes(form)
+        st.download_button(
+            "Download Intake CSV",
+            data=csv_bytes,
+            file_name=f"{safe_name}_Workshop_Intake.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
+
+        st.success("Generated from your exact template.")
+        if st.button("Start new student"):
+            st.experimental_rerun()
+
+    except Exception as e:
+        st.error(f"Template rendering failed: {e}")
