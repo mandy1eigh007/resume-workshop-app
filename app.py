@@ -1,6 +1,6 @@
-# app.py — Resume Workshop → One-Page DOCX (no AI, full build)
-# Front-facing UI = your workshop. Cleans text deterministically.
-# Fills your Word template (docxtpl). Optional CSV-driven translator for prior industries.
+# app.py — Resume Workshop → One-Page DOCX (no AI)
+# Full build: workshop-front UI, deterministic cleanup, CSV-driven translator,
+# quick-add transferable skills, DOCX render via your template, intake CSV.
 
 from __future__ import annotations
 import io, os, re, csv
@@ -13,7 +13,7 @@ from docxtpl import DocxTemplate
 st.set_page_config(page_title="Resume Workshop → One-Page DOCX", page_icon=None, layout="wide")
 
 # ─────────────────────────────────────────────────────────
-# One-page guardrails (tune these if needed)
+# One-page guardrails (tune as needed)
 # ─────────────────────────────────────────────────────────
 MAX_SUMMARY_CHARS = 450
 MAX_SKILLS = 12
@@ -21,6 +21,56 @@ MAX_CERTS = 6
 MAX_JOBS = 3
 MAX_BULLETS_PER_JOB = 4
 MAX_SCHOOLS = 2
+
+# ─────────────────────────────────────────────────────────
+# Canonical transferable skills + synonyms (normalization)
+# ─────────────────────────────────────────────────────────
+SKILL_CANON = [
+    "Problem-solving",
+    "Critical thinking",
+    "Attention to detail",
+    "Time management",
+    "Teamwork & collaboration",
+    "Adaptability & willingness to learn",
+    "Safety awareness",
+    "Conflict resolution",
+    "Customer service",
+    "Leadership",
+    "Reading blueprints & specs",
+    "Hand & power tools",
+    "Materials handling (wood/concrete/metal)",
+    "Operating machinery (e.g., forklifts)",
+    "Trades math & measurement",
+    "Regulatory compliance",
+    "Physical stamina & dexterity",
+]
+
+_SKILL_SYNONYMS = {
+    "problem solving": "Problem-solving",
+    "problem-solving": "Problem-solving",
+    "critical-thinking": "Critical thinking",
+    "attention to details": "Attention to detail",
+    "time-management": "Time management",
+    "teamwork": "Teamwork & collaboration",
+    "collaboration": "Teamwork & collaboration",
+    "adaptability": "Adaptability & willingness to learn",
+    "willingness to learn": "Adaptability & willingness to learn",
+    "safety": "Safety awareness",
+    "customer service skills": "Customer service",
+    "leadership skills": "Leadership",
+    "blueprints": "Reading blueprints & specs",
+    "tools": "Hand & power tools",
+    "machinery": "Operating machinery (e.g., forklifts)",
+    "math": "Trades math & measurement",
+    "measurements": "Trades math & measurement",
+    "compliance": "Regulatory compliance",
+    "stamina": "Physical stamina & dexterity",
+}
+
+def normalize_skill_label(s: str) -> str:
+    key = (s or "").strip().lower()
+    key = re.sub(r"\s+", " ", key)
+    return _SKILL_SYNONYMS.get(key, (s or "").strip().title())
 
 # ─────────────────────────────────────────────────────────
 # Cleanup helpers (no AI)
@@ -41,7 +91,7 @@ def cap_first(s: str) -> str:
 def clean_bullet(s: str) -> str:
     s = norm_ws(s)
     s = FILLER_LEADS.sub("", s)
-    s = re.sub(r"\.+$", "", s)           # drop trailing periods
+    s = re.sub(r"\.+$", "", s)  # drop trailing periods
     s = cap_first(s)
     words = s.split()
     return " ".join(words[:20]) if len(words) > 20 else s
@@ -63,7 +113,6 @@ def split_list(raw: str) -> List[str]:
     return [p for p in parts if p]
 
 def parse_dates(raw: str) -> tuple[str, str]:
-    """Accept 'YYYY-MM – YYYY-MM', 'YYYY – YYYY', 'Present', or anything else."""
     raw = norm_ws(raw)
     if "–" in raw or "-" in raw:
         sep = "–" if "–" in raw else "-"
@@ -73,7 +122,7 @@ def parse_dates(raw: str) -> tuple[str, str]:
     return (raw, "") if raw else ("", "")
 
 # ─────────────────────────────────────────────────────────
-# CSV-driven prior-industry → construction translator (optional)
+# CSV-driven prior-industry → construction translator (no AI)
 # ─────────────────────────────────────────────────────────
 def load_mapping(default_path: str = "career_to_construction.csv"):
     """Load translation rows: industry,keyword,replace_with,note"""
@@ -105,7 +154,7 @@ def translate_line(s: str, mapping: List[Dict[str, str]], industry: str):
     for r in candidates:
         if r["keyword"] in text_l:
             repl = r["replace_with"] or base
-            # If exact substring appears in original case, replace; else use replacement as the line
+            # If exact substring appears, replace; else use replacement as the whole line
             return base.replace(r["keyword"], repl) if r["keyword"] in base else repl
     return base
 
@@ -122,7 +171,7 @@ def translate_skills(skills: List[str], mapping: List[Dict[str, str]], industry:
         ts = translate_line(s, mapping, industry)
         out.append(norm_ws(ts))
     # de-dupe, preserve order, respect cap
-    seen = set(); dedup=[]
+    seen = set(); dedup = []
     for x in out:
         key = x.lower()
         if key in seen: continue
@@ -152,7 +201,7 @@ class School:
     details: str = ""  # City/State or notes
 
 # ─────────────────────────────────────────────────────────
-# Build context for docxtpl (keys must match your .docx template)
+# Build context for docxtpl (keys match your .docx template)
 # ─────────────────────────────────────────────────────────
 def build_context(form: Dict[str, Any], mapping: List[Dict[str, str]], prior_industry: str) -> Dict[str, Any]:
     # Contact
@@ -165,19 +214,29 @@ def build_context(form: Dict[str, Any], mapping: List[Dict[str, str]], prior_ind
     # Objective → final box
     summary = norm_ws(form["Objective_Final"])[:MAX_SUMMARY_CHARS]
 
-    # Skills (merge three lists, then translate, then cap)
+    # Skills (merge three lists → normalize → translate → cap)
     skills_all = []
     for raw in (form["Skills_Transferable"], form["Skills_JobSpecific"], form["Skills_SelfManagement"]):
         skills_all += split_list(raw)
-    skills = [norm_ws(s) for s in skills_all]
-    skills = translate_skills(skills, mapping, prior_industry)
+
+    # Normalize labels, de-dupe, preserve order
+    seen = set(); skills_norm = []
+    for s in skills_all:
+        lab = normalize_skill_label(norm_ws(s))
+        key = lab.lower()
+        if key in seen or not lab:
+            continue
+        seen.add(key)
+        skills_norm.append(lab)
+
+    skills = translate_skills(skills_norm, mapping, prior_industry)
 
     # Certifications
     certs = [norm_ws(c) for c in split_list(form["Certifications"] )][:MAX_CERTS]
 
-    # Experience (up to 3)
+    # Experience (up to MAX_JOBS)
     jobs: List[Job] = []
-    for idx in range(1, 3 + 1):
+    for idx in range(1, MAX_JOBS + 1):
         company = form.get(f"Job{idx}_Company","")
         cityst  = form.get(f"Job{idx}_CityState","")
         dates   = form.get(f"Job{idx}_Dates","")
@@ -200,9 +259,9 @@ def build_context(form: Dict[str, Any], mapping: List[Dict[str, str]], prior_ind
         jobs.append(j)
     jobs = jobs[:MAX_JOBS]
 
-    # Education (up to 2)
+    # Education (up to MAX_SCHOOLS)
     schools: List[School] = []
-    for idx in range(1, 2 + 1):
+    for idx in range(1, MAX_SCHOOLS + 1):
         sch   = form.get(f"Edu{idx}_School","")
         citys = form.get(f"Edu{idx}_CityState","")
         dates = form.get(f"Edu{idx}_Dates","")
@@ -217,7 +276,6 @@ def build_context(form: Dict[str, Any], mapping: List[Dict[str, str]], prior_ind
             year=year,
             details=details
         ))
-    schools = schools[:MAX_SCHOOLS]
 
     # Optional sections → appended to summary tail
     other_work = norm_ws(form.get("Other_Work",""))
@@ -238,7 +296,7 @@ def build_context(form: Dict[str, Any], mapping: List[Dict[str, str]], prior_ind
         "phone": phone,
         "email": email,
         "summary": summary,
-        "skills": skills,
+        "skills": skills[:MAX_SKILLS],
         "certs": certs,
         "jobs": [asdict(j) for j in jobs if any([j.company, j.role, j.bullets])],
         "schools": [asdict(s) for s in schools if any([s.school, s.credential, s.year, s.details])],
@@ -312,11 +370,12 @@ with st.form("workshop"):
 
     # 4) Skills
     st.subheader("4) Your Skills Section")
+    quick_skills = st.multiselect("Quick add transferable skills (pick all that apply):", SKILL_CANON, default=[])
     Skills_Transferable = st.text_area("Transferable Skills (at least five):", "")
     Skills_JobSpecific = st.text_area("Job-Specific Skills (at least five):", "")
     Skills_SelfManagement = st.text_area("Self-Management Skills (at least five):", "")
 
-    # 5) Work Experience — up to 3 jobs
+    # 5) Work Experience — up to MAX_JOBS
     st.subheader("5) Work Experience")
     job_blocks = []
     for idx in range(1, MAX_JOBS + 1):
@@ -335,7 +394,7 @@ with st.form("workshop"):
     st.subheader("6) Certifications")
     Certifications = st.text_area("List certifications (comma or newline). If none, write 'None yet' or planned:", "OSHA-10")
 
-    # 7) Education — up to 2
+    # 7) Education — up to MAX_SCHOOLS
     st.subheader("7) Education")
     edu_blocks = []
     for idx in range(1, MAX_SCHOOLS + 1):
@@ -369,6 +428,11 @@ if submitted:
     if not tpl_bytes:
         st.error("Template not found. Put resume_app_template.docx in the repo or upload one in the sidebar.")
         st.stop()
+
+    # Merge quick-add skills into Transferable so it flows through normalization
+    if quick_skills:
+        extra = ", ".join(quick_skills)
+        Skills_Transferable = (Skills_Transferable + (", " if Skills_Transferable.strip() else "") + extra)
 
     # Collect raw workshop answers
     form = {
@@ -442,7 +506,6 @@ if submitted:
         )
 
         st.success("Generated from your template.")
-
         if st.button("Start new student"):
             st.experimental_rerun()
 
