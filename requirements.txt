@@ -1,22 +1,20 @@
---only-binary=:all:
 pip==24.2
 setuptools==71.1.0
 wheel==0.44.0
 
-# Core
 streamlit==1.36.0
+requests==2.32.3
 
-# Pandas needs a compatible NumPy wheel; pin it to avoid source builds
-numpy==1.26.4
-pandas==2.2.2
-
-# DOCX + templating
+# Text + docs
 docxtpl==0.16.7
 python-docx==0.8.11
-lxml==5.2.1
+lxml==5.3.0
 
 # PDF text
 pypdf==4.2.0
+pdfminer.six==20231228
 
-# Fetch public URLs
-requests==2.32.3
+# If you truly don't use pandas in app.py, leave it out.
+# If you do use it (e.g., for CSV export), pin to versions with manylinux wheels on 3.11:
+numpy==1.26.4
+pandas==2.2.2
