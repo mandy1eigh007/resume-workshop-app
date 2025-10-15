@@ -1,21 +1,6 @@
-# Core tooling
-pip==24.2
-setuptools==71.1.0
-wheel==0.44.0
-
-# App
-streamlit==1.36.0
-requests==2.32.3
-
-# DOCX stack (python-docx -> lxml). Pin lxml to a wheel-friendly build.
-docxtpl==0.16.7
-python-docx==0.8.11
-lxml==5.3.0    # ships manylinux wheels for CPython 3.11 → no compiling
-
-# PDF text extraction
-pypdf==4.2.0
-pdfminer.six==20231228
-
-# Data layer — yes, with pandas (same as before), and the right numpy pair for Py3.11
-numpy==1.26.4
-pandas==2.2.2
+streamlit>=1.37
+pandas>=2.2
+docxtpl>=0.16
+python-docx>=1.1
+pypdf>=4.2
+requests>=2.32
