@@ -1,12 +1,7 @@
-
----
-
-# FILE: requirements.txt
-```text
 streamlit==1.36.0
 pandas==2.2.2
 docxtpl==0.16.7
 python-docx==0.8.11
+lxml==5.2.1
 pypdf==4.2.0
-pdfminer.six==20231228
-requests==2.31.0
+requests==2.32.3
