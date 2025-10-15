@@ -30,6 +30,105 @@ try:
 except Exception:
     pdfminer_extract_text = None
 
+# ─────────────────────────────────────────────────────────
+# Instructor “Stand-Out Playbook” (Seattle Tri-County)
+# Inserted verbatim into the Instructor Pathway Packet
+# ─────────────────────────────────────────────────────────
+STAND_OUT_PLAYBOOK = """
+Instructor Packet — “Stand Out” Playbook (Seattle tri-county focus)
+Updated: October 14, 2025
+
+Context
+Pre-apprentice grads already have Flagger, OSHA-10, and Forklift. This playbook lists beyond-baseline moves that measurably improve selection odds for union and non-union pathways in King, Pierce, and Snohomish counties. Keep objectives neutral (no union/non-union or sub-trade labels).
+
+Verify the basics (what they really mean)
+• OSHA-10/30: Outreach training cards, not “certifications.” OSHA-30 is typically for leads/supervisors. Some owners/GCs require Outreach; cite it correctly (e.g., “OSHA Outreach 10-Hour (Construction)”).
+• Forklift: Employers must train/evaluate/certify on the specific truck(s) and workplace; evaluation at least every 3 years. Third-party classes help, but on-site employer evaluation is what counts.
+• WA Flagger: Training must meet WAC; card expiration is max 3 years from issuance and requires photo ID.
+• Rule of thumb: Show evidence (dates, evaluator, equipment class) rather than vague claims.
+
+Quick wins by target
+
+Electrical (Inside, Residential, Limited Energy)
+Program reality check (union): Inside Wire apprenticeship ~8,000 OJT + ~1,000 classroom hours before WA (01) exam. Expect algebra and steady attendance.
+Stand-out stack:
+  – Documented tool time: conduit measuring, simple bends, layout, wire pulls, labeling/testing, terminations (supervised).
+  – Low-voltage crossover: labeling, continuity testing, device counts, as-built updates.
+  – Holdover jobs: warehouse/runner at ECs, prefab shop, material handler.
+Evidence bullets:
+  – “Measured and marked 20+ EMT runs (½–1 in.), verified offsets with level; staged hardware by circuit.”
+  – “Assisted two-person pulls; maintained lube, pulling tension calls, and device labeling.”
+Study cues to log:
+  – Code vocabulary (lockout/tagout basics, conductor IDs), print reading (symbols, schedules), torque/termination habits.
+
+Pipe Trades / HVAC-R (Plumber, Steamfitter, HVAC-R)
+Program reality check: Multiple programs with classroom + OJT; math, brazing/soldering foundations, and safe handling are emphasized.
+Stand-out stack:
+  – EPA 608 (Type I/II/III or Universal); durable credential—list the Type explicitly on resume.
+  – Shop helper/parts counter; sheet-metal fab helper; maintenance tech trainee.
+Evidence bullets:
+  – “Assisted brazing setups (nitrogen purge), leak checks, and recovery under supervision; logged pressures/temps.”
+  – “Cut/threaded pipe to spec; verified lengths against prints; maintained clean, labeled stock.”
+Study cues to log:
+  – Refrigeration cycle basics, pressure/temperature relationships, pipefitting math, reading simple mechanical plans.
+
+Outside Power & Power Line Clearance Tree Trimmer
+Program reality check: Applications are typically ranked monthly; extra points for documented skills/credentials.
+Stand-out stack:
+  – CDL-B/A progress, ISA coursework exposure, pesticide Laws & Safety (Right-of-Way), First Aid/CPR.
+  – Ground operations: rigging hand signals, staging, chipper safety, drop zones, storm-response readiness.
+Evidence bullets:
+  – “Supported ground rigging and controlled lowers; maintained 2x drop-zone buffers and traffic cones per plan.”
+  – “Daily equipment checks (chainsaw bar/chain tension, fluids, PPE); documented defects and lockout.”
+Study cues to log:
+  – Electrical hazard awareness around energized equipment, communication protocols, right-of-way practices.
+
+Cross-trade “beyond baseline” moves
+• Level up OSHA for leads: OSHA-30 adds credibility for future crew leads (still Outreach training—cite correctly).
+• Forklift leverage: Convert classroom cards into employer certification early; keep the evaluation record (date, evaluator, truck class).
+• Evidence beats adjectives: Quantities, measurements, prints followed, PPE used, who verified. Avoid “hard worker” fluff.
+• Veterans pipeline: Helmets-to-Hardhats style programs connect directly to JATCs and building trades.
+• Holdover jobs that count: material handler (ECs/mechanicals), prefab helper, tool room/parts counter, facilities maintenance helper, demo/site cleanup (document hazard controls), traffic control with lead shifts.
+
+How to write bullets that pop (fast template)
+Pattern: Action + Quantity/Tool/Spec + Safety/Quality + Verification
+Examples:
+  – “Staged and labeled 120+ devices; matched counts to plan sheets; maintained clear aisles and PPE.”
+  – “Cut and set 30+ ft of conduit per mark; verified offsets with level; QC’d by lead before pull.”
+  – “Loaded/unloaded 20+ pallets; strapped and tagged; kept walkways clear per JHA.”
+
+Resume do-and-don’t (for pre-apprentice)
+Do:
+  – Put contact info cleanly at top; City, ST; one phone; one email.
+  – Show certs that matter (OSHA Outreach, WA Flagger, Forklift—employer evaluation, First Aid/CPR, Aerial Lift).
+  – Show tools, materials, measurements, and safety habits.
+  – Keep it one page and readable.
+Don’t:
+  – Don’t claim journeyman-level skills.
+  – Don’t use union/non-union labels, “inside wire”/“low-voltage,” or local numbers in objectives.
+  – Don’t list generic “hard worker” without evidence.
+
+Interview reps (practice drills)
+• 60-second “walk me through a task” using the bullet pattern.
+• “Tell me about a time you caught a safety issue” — focus on PPE/JHA/lockout cues and who you notified.
+• “How do you handle fast pace?” — talk staging, sequencing, and clean handoffs.
+
+Local anchors to include (tri-county)
+• Electrical apprenticeship pages (Inside/Limited/Residential): program hours, math expectations, application rhythm.
+• Pipe Trades apprenticeship overview and contact.
+• Outside power/tree programs: application cadence, points, CDL expectations, and contact info.
+(Verify the most current pages each quarter; print or save the PDFs you hand students.)
+
+Resume phrasing examples (safe & neutral)
+• “OSHA Outreach 10-Hour (Construction), 2025.”
+• “Forklift: employer-certified (sit-down electric), evaluation current.”
+• “WA Flagger card (expires 2027).”
+• “EPA 608—Type II (if obtained).”
+
+Instructor note
+Requirements, dates, and processes change. Treat this playbook as a living section—review quarterly and reprint. Use the packet’s full-text attachments to keep evidence with the student’s materials (postings, program PDFs, etc.).
+"""
+
 st.set_page_config(page_title="Resume Workshop & Pathways", layout="wide")
 
 # ─────────────────────────────────────────────────────────
