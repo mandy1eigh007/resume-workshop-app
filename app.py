@@ -1,13 +1,14 @@
 # app.py — Resume Workshop & Pathways (Seattle Tri-County)
 # Streamlit single-file app. No APIs. Browser-only. Python 3.11.
-# This build:
-# - Uses Job_History_Master.docx (Heading 1 = role; bullet paragraphs = duties)
-# - Removes "difference" section; straight resume building
-# - Autofills header (Name/Phone/Email/City/State) from uploaded text
-# - Objective = recommendations only; student types final
-# - Skills auto-suggested from uploaded text + selected role bullets
-# - Work Experience: detect roles, select roles, click bullets → insert into Job 1/2/3 duties
-# - Neutral language preserved
+# Clean rebuild (replaces broken Sonnet draft).
+# - Robust header extraction (DOCX paragraphs+tables; PDF via pdfminer then pypdf)
+# - Education proximity parsing; normalized certifications; dedup
+# - Role detection with word boundaries; Job_History_Master.docx parser (H1=role; paragraphs=bullets)
+# - Bullet click -> insert duties AND infer job-specific skills (no passive spam)
+# - Skills buckets: Suggested (text), Inferred (bullets), Quick-Add (canon); dedup; capped
+# - Objective = recommendations only (apprenticeship/job). Student types final objective.
+# - Instructor Packet embeds full text of all uploads/URLs/paste; neutral language scrub
+# - Caching for job master parsing; stable state keys; no double-insert
 
 from __future__ import annotations
 import io, os, re, csv, datetime
@@ -17,12 +18,13 @@ from typing import List, Dict, Any, Tuple
 import streamlit as st
 import pandas as pd
 from docxtpl import DocxTemplate
+from docx import Document as DocxReader
 from docx import Document as DocxWriter
 from docx.shared import Pt
 from pypdf import PdfReader
 import requests
 
-# Optional PDF fallback if present (no error if missing)
+# Optional PDF fallback for text extraction
 try:
     from pdfminer.high_level import extract_text as pdfminer_extract_text
 except Exception:
@@ -49,11 +51,18 @@ BANNED_RE = re.compile("|".join(UNION_BANS), re.I)
 FILLER_LEADS = re.compile(r"^\s*(responsible for|duties included|tasked with|in charge of)\s*:?\s*", re.I)
 MULTISPACE = re.compile(r"\s+")
 EMAIL_RE = re.compile(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", re.I)
-PHONE_RE = re.compile(r"(\+?1[\s\-\.])?\(?\d{3}\)?[\s\-\.]?\d{3}[\s\-\.]?\d{4}")
+PHONE_RE = re.compile(r"(\+?1[\s\-\.]?)?\(?\d{3}\)?[\s\-\.]?\d{3}[\s\-\.]?\d{4}")
 PHONE_DIGITS = re.compile(r"\D+")
 CITY_STATE_RE = re.compile(r"\b([A-Za-z .'-]{2,}),\s*([A-Za-z]{2})\b")
 DATE_RANGE_RE = re.compile(
     r"(?P<start>(?:\d{4}|\w{3,9}\s+\d{4}))\s*(?:–|-|to|until|through)\s*(?P<end>(?:Present|Current|\d{4}|\w{3,9}\s+\d{4}))",
+    re.I
+)
+SECTION_HEADERS = re.compile(
+    r"^(objective|summary|professional summary|skills|core competencies|experience|work history|"
+    r"employment|education|certifications|certificates|references|contact|profile|qualifications|"
+    r"career|background|achievements|accomplishments|projects|volunteer|activities|interests|"
+    r"technical skills|languages|awards|honors|publications|training|licenses|memberships)$",
     re.I
 )
 
@@ -73,8 +82,10 @@ def cap_first(s: str) -> str:
 
 def clean_phone(s: str) -> str:
     digits = PHONE_DIGITS.sub("", s or "")
-    if len(digits)==11 and digits.startswith("1"): digits = digits[1:]
-    if len(digits)==10: return f"({digits[:3]}) {digits[3:6]}-{digits[6:]}"
+    if len(digits)==11 and digits.startswith("1"):
+        digits = digits[1:]
+    if len(digits)==10:
+        return f"({digits[:3]}) {digits[3:6]}-{digits[6:]}"
     return norm_ws(s or "")
 
 def clean_email(s: str) -> str:
@@ -94,46 +105,61 @@ def split_list(raw: str) -> List[str]:
     parts = [p.strip(" •\t") for p in re.split(r"[,\n;•]+", raw)]
     return [p for p in parts if p]
 
-def parse_dates(raw: str) -> tuple[str,str]:
+def parse_dates(raw: str) -> Tuple[str,str]:
     raw = norm_ws(raw)
     m = DATE_RANGE_RE.search(raw)
-    if m: return (m.group("start"), m.group("end"))
+    if m:
+        return (m.group("start"), m.group("end"))
     if "–" in raw or "-" in raw:
         sep = "–" if "–" in raw else "-"
         bits = [b.strip() for b in raw.split(sep,1)]
-        if len(bits)==2: return bits[0], bits[1]
+        if len(bits)==2:
+            return bits[0], bits[1]
     return (raw,"") if raw else ("","")
 
 # ─────────────────────────────────────────────────────────
 # File text extraction & public URL fetch
 # ─────────────────────────────────────────────────────────
 def extract_text_from_pdf(file) -> str:
+    # Prefer pdfminer (better for text-based PDFs)
     try:
-        reader = PdfReader(file); chunks=[]
-        for p in reader.pages:
-            txt = p.extract_text() or ""
-            chunks.append(txt)
-        text = "\n".join(chunks)
-        if text.strip(): return text
-    except Exception:
-        pass
-    if pdfminer_extract_text is not None:
-        try:
+        if pdfminer_extract_text is not None:
             if hasattr(file, "getvalue"):
                 bio = io.BytesIO(file.getvalue())
             else:
-                file.seek(0); bio = file
-            text = pdfminer_extract_text(bio) or ""
-            return text
-        except Exception:
-            return ""
-    return ""
+                try: file.seek(0)
+                except Exception: pass
+                data = file.read()
+                bio = io.BytesIO(data)
+            bio.seek(0)
+            txt = pdfminer_extract_text(bio) or ""
+            if txt.strip():
+                return txt
+    except Exception:
+        pass
+    # Fallback: pypdf
+    try:
+        if hasattr(file, "seek"):
+            try: file.seek(0)
+            except Exception: pass
+        reader = PdfReader(file)
+        return "\n".join((p.extract_text() or "") for p in reader.pages)
+    except Exception:
+        return ""
 
 def extract_text_from_docx(file) -> str:
     try:
-        from docx import Document as DocxReader
         doc = DocxReader(file)
-        return "\n".join(p.text for p in doc.paragraphs)
+        parts = []
+        for p in doc.paragraphs:
+            if p.text.strip():
+                parts.append(p.text)
+        for tbl in doc.tables:
+            for row in tbl.rows:
+                cells = [c.text.strip() for c in row.cells if c.text.strip()]
+                if cells:
+                    parts.append(" | ".join(cells))
+        return "\n".join(parts)
     except Exception:
         return ""
 
@@ -163,7 +189,9 @@ def fetch_url_to_named_bytes(url: str, fallback_name: str = "downloaded_file") -
         u = _drive_direct(url.strip())
         r = requests.get(u, timeout=30)
         r.raise_for_status()
-        name = (url.split("?")[0].rstrip("/").split("/")[-1] or fallback_name)
+        # try to guess name
+        base = url.split("?")[0].rstrip("/").split("/")[-1] or fallback_name
+        name = base
         if "." not in name:
             ct = r.headers.get("content-type","").lower()
             if "pdf" in ct: name += ".pdf"
@@ -208,7 +236,6 @@ TRANSFERABLE_KEYWORDS = {
     "code": "Regulatory compliance", "permit": "Regulatory compliance", "compliance": "Regulatory compliance",
     "stamina": "Physical stamina & dexterity", "lift": "Physical stamina & dexterity",
 }
-
 def normalize_skill_label(s: str) -> str:
     base = (s or "").strip()
     key = re.sub(r"\s+"," ",base.lower())
@@ -234,8 +261,9 @@ def categorize_skills(skills: List[str]) -> Dict[str, List[str]]:
         if not lab: continue
         if lab.lower() in seen: continue
         seen.add(lab.lower())
-        # light heuristic to place
-        if lab in {"Reading blueprints & specs","Hand & power tools","Operating machinery","Materials handling (wood/concrete/metal)","Trades math & measurement","Regulatory compliance","Safety awareness"}:
+        if lab in {"Reading blueprints & specs","Hand & power tools","Operating machinery",
+                   "Materials handling (wood/concrete/metal)","Trades math & measurement",
+                   "Regulatory compliance","Safety awareness"}:
             cat="Job-Specific"
         elif lab in {"Leadership","Adaptability & willingness to learn","Physical stamina & dexterity"}:
             cat="Self-Management"
@@ -245,7 +273,7 @@ def categorize_skills(skills: List[str]) -> Dict[str, List[str]]:
     return out
 
 # ─────────────────────────────────────────────────────────
-# Trade taxonomy
+# Trade taxonomy (for UI hinting only)
 # ─────────────────────────────────────────────────────────
 TRADE_TAXONOMY = [
     "Boilermaker (Local 104, 502)",
@@ -277,18 +305,47 @@ TRADE_TAXONOMY = [
 ]
 
 # ─────────────────────────────────────────────────────────
-# Parse Job_History_Master.docx
+# Cert parsing (normalized labels with deduplication)
 # ─────────────────────────────────────────────────────────
-def read_job_master() -> Dict[str, List[str]]:
-    # Try sidebar upload first; else repo root file
-    if "job_master_bytes" in st.session_state:
-        raw = st.session_state["job_master_bytes"]
-        doc = DocxWriter(io.BytesIO(raw))
+CERT_MAP = {
+    "osha": "OSHA Outreach 10-Hour (Construction)",
+    "osha-10": "OSHA Outreach 10-Hour (Construction)",
+    "osha 10": "OSHA Outreach 10-Hour (Construction)",
+    "osha10": "OSHA Outreach 10-Hour (Construction)",
+    "osha 30": "OSHA Outreach 30-Hour (Construction)",
+    "osha-30": "OSHA Outreach 30-Hour (Construction)",
+    "osha30": "OSHA Outreach 30-Hour (Construction)",
+    "flagger": "WA Flagger (expires 3 years from issuance)",
+    "wa flagger": "WA Flagger (expires 3 years from issuance)",
+    "forklift": "Forklift — employer evaluation on hire",
+    "fork lift": "Forklift — employer evaluation on hire",
+    "cpr": "CPR",
+    "first aid": "First Aid",
+    "firstaid": "First Aid",
+    "aerial lift": "Aerial Lift",
+    "confined space": "Confined Space",
+    "traffic control": "Traffic Control",
+}
+def parse_certs(text: str) -> List[str]:
+    low = (text or "").lower()
+    out=set()
+    for k,v in CERT_MAP.items():
+        if re.search(rf"\b{re.escape(k)}\b", low):
+            out.add(v)
+    return sorted(out)
+
+# ─────────────────────────────────────────────────────────
+# Job Master (DOCX) parsing + cache (H1=role; following paragraphs=bullets)
+# ─────────────────────────────────────────────────────────
+@st.cache_data
+def cached_read_job_master(raw_bytes: bytes|None) -> Dict[str, List[str]]:
+    if raw_bytes:
+        doc = DocxReader(io.BytesIO(raw_bytes))
     else:
-        path = "Job_History_Master.docx"
-        if not os.path.exists(path):
+        if not os.path.exists("Job_History_Master.docx"):
             return {}
-        doc = DocxWriter(path)
+        doc = DocxReader("Job_History_Master.docx")
+
     roles: Dict[str,List[str]] = {}
     cur = None
     for p in doc.paragraphs:
@@ -300,33 +357,89 @@ def read_job_master() -> Dict[str, List[str]]:
             cur = text
             roles.setdefault(cur, [])
             continue
-        # treat list bullet or plain text under a role as a bullet
         if cur:
             roles[cur].append(clean_bullet(text))
-    # Dedup and clamp
+
+    # Dedup + clamp bullets
     for k,v in roles.items():
-        dedup=[]; seen=set()
+        seen=set(); dedup=[]
         for b in v:
             key=b.lower()
             if key in seen: continue
             seen.add(key); dedup.append(b)
-        roles[k]=dedup[:12]
+        roles[k] = dedup[:20]
     return roles
 
-# Skill suggestions derived from chosen bullets (simple keyword map)
-BULLET_SKILL_HINTS = [
-    (re.compile(r"\b(anchor|bolt|rig|signal|bucket|harness|tie[-\s]?off|drop zone)\b", re.I), "Safety awareness"),
-    (re.compile(r"\b(clean|organize|stage|restock|housekeep|walkway)\b", re.I), "Attention to detail"),
-    (re.compile(r"\b(pallet|forklift|lift|jack|rig|hoist|carry|load|unload)\b", re.I), "Materials handling (wood/concrete/metal)"),
-    (re.compile(r"\b(conduit|measure|layout|prints?|drawings?)\b", re.I), "Reading blueprints & specs"),
-    (re.compile(r"\b(grinder|drill|saw|snips|hand tools|power tools)\b", re.I), "Hand & power tools"),
-    (re.compile(r"\b(ppa|ppe|osha|lockout|tagout|loto|hazard|spill)\b", re.I), "Regulatory compliance"),
-    (re.compile(r"\b(count|verify|qc|inspect|torque)\b", re.I), "Critical thinking"),
-    (re.compile(r"\b(rush|deadlines?|targets?|production|pace)\b", re.I), "Time management"),
-    (re.compile(r"\b(team|crew|assist|support|communicat)\b", re.I), "Teamwork & collaboration"),
-    (re.compile(r"\b(climb|lift|carry|physical)\b", re.I), "Physical stamina & dexterity"),
-]
+# Role aliases (word-boundary search)
+ROLE_ALIASES = {
+    "Line Cook": ["line cook","cook","kitchen"],
+    "Prep Cook": ["prep cook","prep"],
+    "Server": ["server","waiter","waitress","front of house","foh"],
+    "Dishwasher": ["dishwasher","dishes"],
+    "Barista": ["barista","coffee"],
+    "Cashier": ["cashier","till","pos"],
+    "Retail Associate": ["retail associate","retail","sales associate"],
+    "Stocker": ["stocker","stocking","stock clerk"],
+    "Warehouse Associate": ["warehouse associate","warehouse","whse"],
+    "Order Selector": ["order selector","selector","order picker","picker"],
+    "Shipping & Receiving": ["shipping","receiving","ship","receive"],
+    "Material Handler": ["material handler","materials","handler"],
+    "Forklift Operator (trainee/experience)": ["forklift","lift truck","fork truck"],
+    "Delivery Driver (Non-CDL)": ["delivery driver","driver","courier"],
+    "Mover": ["mover","moving"],
+    "Janitor": ["janitor","custodian"],
+    "Custodian": ["custodian","janitor"],
+    "Housekeeper": ["housekeeper","housekeeping","room attendant"],
+    "Security Guard": ["security","guard"],
+    "Landscaper/Groundskeeper": ["landscaper","grounds","groundskeeper","mowing"],
+    "Construction Laborer (general)": ["construction laborer","laborer","construction"],
+    "Demolition Laborer": ["demolition","demo"],
+    "Traffic Control/Flagger": ["flagger","traffic control"],
+    "Tool Room Attendant": ["tool room","tool attendant","toolroom"],
+    "Parts Counter": ["parts counter","parts"],
+    "Facilities Porter": ["porter","facilities porter"],
+    "Event Setup Crew/Stagehand": ["stagehand","event setup","av crew"],
+    "Maintenance Helper": ["maintenance helper","maintenance"],
+    "Painter Helper": ["painter helper","paint prep","painter"],
+    "Drywall/Lather Helper": ["drywall","lather","sheetrock"],
+    "Flooring Helper": ["flooring helper","flooring"],
+    "Concrete Laborer": ["concrete laborer","concrete"],
+    "Mason Tender": ["mason tender","masonry helper","masonry"],
+    "Carpenter Helper": ["carpenter helper","carpenter","framing"],
+    "Roofer Helper": ["roofer","roofing"],
+    "HVAC Helper": ["hvac helper","hvac"],
+    "Electrical Helper": ["electrical helper","electrician helper","electrical"],
+    "Plumbing Helper": ["plumbing helper","plumbing","plumber helper"],
+    "Sheet Metal Helper": ["sheet metal helper","sheet metal"],
+    "Ironworker Helper": ["ironworker helper","ironworker"],
+    "Glazier Helper": ["glazier","glazier helper","glass"],
+    "Welder/Fabrication Helper": ["welder","fabrication","fab"],
+    "Grounds/Right-of-Way Helper": ["right of way","row","grounds"],
+    "Warehouse Clerk": ["warehouse clerk","inventory clerk"],
+    "Assembler (Light Manufacturing)": ["assembler","assembly","light manufacturing"],
+}
+def detect_roles_from_text(text: str, all_roles: List[str]) -> List[str]:
+    low = (text or "").lower()
+    found=set()
+    for r in all_roles:
+        terms = ROLE_ALIASES.get(r, [r.lower()])
+        for t in terms:
+            if re.search(rf"\b{re.escape(t)}\b", low):
+                found.add(r); break
+    return [r for r in all_roles if r in found][:12]
 
+# Bullet→skills inference (only on insert)
+BULLET_SKILL_HINTS = [
+    (re.compile(r"\b(clean|organize|stage|restock|housekeep|walkway|sweep|debris)\b", re.I), "Attention to detail"),
+    (re.compile(r"\b(pallet|forklift|lift|jack|rig|hoist|carry|load|unload|stack)\b", re.I), "Materials handling (wood/concrete/metal)"),
+    (re.compile(r"\b(conduit|measure|layout|prints?|drawings?)\b", re.I), "Reading blueprints & specs"),
+    (re.compile(r"\b(grinder|drill|saw|snips|hand tools|power tools|torch)\b", re.I), "Hand & power tools"),
+    (re.compile(r"\b(ppe|osha|lockout|tagout|loto|hazard|spill|permit)\b", re.I), "Regulatory compliance"),
+    (re.compile(r"\b(count|verify|inspect|qc|torque|measure)\b", re.I), "Critical thinking"),
+    (re.compile(r"\b(rush|deadline|targets?|production|pace)\b", re.I), "Time management"),
+    (re.compile(r"\b(team|crew|assist|support|communicat)\b", re.I), "Teamwork & collaboration"),
+    (re.compile(r"\b(climb|lift|carry|physical|stamina)\b", re.I), "Physical stamina & dexterity"),
+]
 def skills_from_bullets(bullets: List[str]) -> List[str]:
     hits=set()
     for b in bullets:
@@ -335,105 +448,59 @@ def skills_from_bullets(bullets: List[str]) -> List[str]:
                 hits.add(skill)
     return list(hits)
 
-# Role detection from uploaded text (naive keyword match)
-def detect_roles_from_text(text: str, all_roles: List[str]) -> List[str]:
-    low = (text or "").lower()
-    found=[]
-    for r in all_roles:
-        k=r.lower()
-        # break to simple triggers (line cook → "line cook"; warehouse associate → "warehouse")
-        tokens = [w for w in re.split(r"[^a-z0-9]+", k) if len(w)>=4]
-        if any(t in low for t in tokens):
-            found.append(r)
-    # dedup, keep order of appearance in all_roles
-    seen=set(); out=[]
-    for r in all_roles:
-        if r in found and r not in seen:
-            seen.add(r); out.append(r)
-    return out[:10]
+# ─────────────────────────────────────────────────────────
+# Header / Education parsing
+# ─────────────────────────────────────────────────────────
+def _likely_name(lines: List[str]) -> str:
+    best = ""; best_score = -1.0
+    for i, l in enumerate(lines[:20]):
+        s = l.strip()
+        if not s: continue
+        if EMAIL_RE.search(s) or PHONE_RE.search(s): continue
+        if SECTION_HEADERS.match(s): continue
+        if re.search(r"(objective|summary|skills|experience|education|cert|resume|cv|curriculum)", s, re.I): continue
+        words = [w for w in re.split(r"\s+", s) if w]
+        if not (2 <= len(words) <= 4): continue
+        if any(re.search(r"\d", w) for w in words): continue
+        skip = {"address","phone","email","street","avenue","road","city","state","zip"}
+        if any(w.lower() in skip for w in words): continue
+        caps = sum(1 for w in words if w[:1].isalpha() and w[:1].isupper())
+        score = caps/len(words) + (20 - i)*0.01
+        if score > best_score:
+            best_score = score; best = s
+    return best
 
-# ─────────────────────────────────────────────────────────
-# Parsing helpers (header/jobs/edu/certs)
-# ─────────────────────────────────────────────────────────
 def parse_header(text: str) -> Dict[str,str]:
-    name = ""; email = ""; phone = ""; city = ""; state = ""
-    m = EMAIL_RE.search(text or "");  email = m.group(0) if m else ""
-    m = PHONE_RE.search(text or "");  phone = m.group(0) if m else ""
-    # Try to find a top contact block
-    top = "\n".join([l.strip() for l in (text or "").splitlines()[:18] if l.strip()])
-    sep_line = re.sub(r"[•·–—\-•]+", "|", top)
-    for candidate in sep_line.split("\n"):
-        if "@" in candidate or re.search(r"\d{3}.*\d{4}", candidate):
-            parts = [p.strip() for p in re.split(r"\|", candidate) if p.strip()]
-            for p in parts:
-                if EMAIL_RE.search(p) or PHONE_RE.search(p):
-                    continue
-                mcs = CITY_STATE_RE.search(p)
-                if mcs:
-                    city, state = mcs.group(1), mcs.group(2).upper()
-                    continue
-                if 2 <= len(p.split()) <= 4 and not re.search(r"\d", p):
-                    caps = sum(w[:1].isupper() for w in p.split())
-                    if caps >= 2:
-                        name = p
-                        break
-    if not name:
-        for l in [l.strip() for l in (text or "").splitlines()[:15]]:
-            if EMAIL_RE.search(l) or PHONE_RE.search(l):
-                continue
-            if any(h in l.lower() for h in ["objective","summary","skills","experience","education"]):
-                continue
-            if 2 <= len(l.split()) <= 4 and all(w and w[0].isalpha() for w in l.split()):
-                tokens = l.split()
-                if sum(t[:1].isupper() for t in tokens) >= 2:
-                    name = l
-                    break
-    if not city or not state:
-        m2 = CITY_STATE_RE.search(text or "")
-        if m2:
-            city, state = m2.group(1), m2.group(2).upper()
+    name=""; email=""; phone=""; city=""; state=""
+    m = EMAIL_RE.search(text or ""); email = m.group(0) if m else ""
+    m = PHONE_RE.search(text or ""); phone = m.group(0) if m else ""
+    lines = [l.strip() for l in (text or "").splitlines() if l.strip()]
+    m2 = CITY_STATE_RE.search("\n".join(lines[:30]))
+    if m2:
+        city, state = m2.group(1), m2.group(2).upper()
+    name = _likely_name(lines)
     return {"Name": cap_first(name), "Email": clean_email(email), "Phone": clean_phone(phone),
             "City": cap_first(city), "State": (state or "").strip()}
 
 def parse_education(text: str) -> List[Dict[str,str]]:
     out=[]
-    lines = [l.strip() for l in (text or "").splitlines()]
+    lines = [l.strip() for l in (text or "").splitlines() if l.strip()]
+    edu_keywords = r"(high school|ged|college|university|program|certificate|diploma|academy|institute|school of)"
     i=0
     while i < len(lines) and len(out) < MAX_SCHOOLS:
         l = lines[i]
-        if re.search(r"(high school|ged|college|university|program|certificate|diploma)", l, re.I):
-            school = cap_first(l)
-            cred=""; year=""; details=""
-            for la in lines[i+1:i+5]:
-                if re.search(r"\b(20\d{2}|19\d{2})\b", la):
-                    year = la.strip()
+        if re.search(edu_keywords, l, re.I):
+            school = cap_first(l); cred=""; year=""; details=""
+            for la in lines[i+1:i+7]:
+                if not year and re.search(r"\b(20\d{2}|19\d{2})\b", la): year = la.strip()
                 mcs = CITY_STATE_RE.search(la)
-                if mcs:
-                    details = f"{mcs.group(1)}, {mcs.group(2).upper()}"
-                if any(x in la.lower() for x in ["diploma","degree","certificate","ged","program"]) and not cred:
-                    cred = cap_first(la.strip())
+                if mcs and not details: details = f"{mcs.group(1)}, {mcs.group(2).upper()}"
+                if not cred:
+                    if any(x in la.lower() for x in ["diploma","degree","certificate","ged","program","apprentice","associate","bachelor","master"]):
+                        cred = cap_first(la.strip())
             out.append({"school": school, "credential": cred, "year": year, "details": details})
         i+=1
     return out[:MAX_SCHOOLS]
-
-CERT_KEYWORDS = [
-    "osha", "forklift", "flagger", "cpr", "first aid", "hazwoper",
-    "twic", "nccer", "confined space", "ppe", "aerial lift", "traffic control"
-]
-def parse_certs(text: str) -> List[str]:
-    low = (text or "").lower()
-    found=set()
-    for k in CERT_KEYWORDS:
-        if k in low:
-            if k=="osha": found.add("OSHA-10")
-            elif k=="first aid": found.add("First Aid")
-            elif k=="aerial lift": found.add("Aerial Lift")
-            else: found.add(k.title())
-    for line in (text or "").splitlines():
-        if re.search(r"flagger", line, re.I): found.add("Flagger")
-        if re.search(r"forklift", line, re.I): found.add("Forklift")
-        if re.search(r"\bcpr\b", line, re.I): found.add("CPR")
-    return sorted(found)
 
 # ─────────────────────────────────────────────────────────
 # Data classes + resume rendering
@@ -449,14 +516,27 @@ class Job:
 class School:
     school:str=""; credential:str=""; year:str=""; details:str=""
 
+def build_objective_recommendations(target_type: str, trade: str) -> List[str]:
+    trade_txt = trade
+    if target_type == "Apprenticeship":
+        return [
+            f"Seeking entry into a {trade_txt} apprenticeship; ready to show up safe, learn fast, and support the crew.",
+            f"Aiming for {trade_txt} apprenticeship placement—reliable, safety-forward, and coachable with strong work pace.",
+            f"Applying to {trade_txt} apprenticeship; committed to tool proficiency, print reading basics, and productive teamwork."
+        ]
+    else:
+        return [
+            f"Seeking hands-on work in {trade_txt}; dependable, safety-aware, and ready to contribute on Day 1.",
+            f"Looking for entry-level {trade_txt} work—strong pace, clean work areas, and consistent follow-through.",
+            f"Pursuing {trade_txt} work; show up, work safe, take direction, and help the crew hit targets."
+        ]
+
 def build_resume_context(form: Dict[str,Any], trade_label: str) -> Dict[str,Any]:
     Name=cap_first(form["Name"]); City=cap_first(form["City"]); State=(form["State"] or "").strip().upper()
     phone=clean_phone(form["Phone"]); email=clean_email(form["Email"])
-
-    # Objective: use user's final (recommendations were shown earlier; not auto-inserted)
     summary = strip_banned(norm_ws(form.get("Objective_Final","")))[:MAX_SUMMARY_CHARS]
 
-    # Skills
+    # Skills normalization + dedupe
     skills_all=[]
     for raw in (form.get("Skills_Transferable",""), form.get("Skills_JobSpecific",""), form.get("Skills_SelfManagement","")):
         skills_all += split_list(raw)
@@ -490,8 +570,7 @@ def build_resume_context(form: Dict[str,Any], trade_label: str) -> Dict[str,Any]
     return {
         "Name": Name, "City": City, "State": State,
         "phone": phone, "email": email, "summary": summary,
-        "skills": skills,
-        "certs": certs,
+        "skills": skills, "certs": certs,
         "jobs": [asdict(j) for j in jobs if any([j.company,j.role,j.bullets])],
         "schools": [asdict(s) for s in schools if any([s.school,s.credential,s.year,s.details])],
         "trade_label": trade_label,
@@ -535,10 +614,9 @@ def build_cover_letter_docx(data: Dict[str,str]) -> bytes:
     p2.add_run(
         "My background includes tool proficiency, teamwork under real schedules, and a commitment to quality and safe production."
     )
-    hi = split_list(body_strength)
-    if hi:
+    if body_strength:
         doc.add_paragraph("Highlights:")
-        for line in hi:
+        for line in split_list(body_strength):
             doc.add_paragraph(f"• {line}")
 
     doc.add_paragraph("")
@@ -564,6 +642,7 @@ def build_pathway_packet_docx(student: Dict[str,str], trade_label: str, app_type
         for line in (v or "").splitlines():
             doc.add_paragraph(line)
 
+    # Full-text embeds
     for upl in sources or []:
         doc.add_page_break()
         doc.add_heading(getattr(upl,"name","(file)"), level=1)
@@ -578,7 +657,7 @@ def build_pathway_packet_docx(student: Dict[str,str], trade_label: str, app_type
     return out.getvalue()
 
 # ─────────────────────────────────────────────────────────
-# Sidebar — template + job master + extra docs
+# Sidebar — template & Job Master + extra docs
 # ─────────────────────────────────────────────────────────
 with st.sidebar:
     st.header("Templates & Docs")
@@ -587,34 +666,31 @@ with st.sidebar:
     if os.path.exists("resume_app_template.docx"):
         with open("resume_app_template.docx","rb") as f: tpl_bytes=f.read()
     upl_tpl = st.file_uploader("Upload RESUME DOCX template (optional)", type=["docx"])
-    if upl_tpl is not None:
-        tpl_bytes = upl_tpl.read()
+    if upl_tpl is not None: tpl_bytes = upl_tpl.read()
 
     st.markdown("---")
-    st.caption("Upload Job History Master (optional override).")
-    job_master_upl = st.file_uploader("Job_History_Master.docx", type=["docx"], accept_multiple_files=False)
-    if job_master_upl is not None:
-        st.session_state["job_master_bytes"] = job_master_upl.read()
+    st.caption("Upload Job History Master (DOCX; H1 = Role; subsequent paragraphs = bullets)")
+    master_bytes=None
+    if os.path.exists("Job_History_Master.docx"):
+        with open("Job_History_Master.docx","rb") as f: master_bytes=f.read()
+    upl_master = st.file_uploader("Upload Job_History_Master.docx (optional)", type=["docx"])
+    if upl_master is not None: master_bytes = upl_master.read()
 
     st.markdown("---")
-    st.caption("Upload additional instructor/pathway docs (PDF/DOCX/TXT). These get embedded (full text) in the Instructor Packet.")
+    st.caption("Upload additional pathway docs (PDF/DOCX/TXT). These embed (full text) in the Instructor Packet.")
     pathway_uploads = st.file_uploader("Upload pathway documents", type=["pdf","docx","txt"], accept_multiple_files=True)
 
 # ─────────────────────────────────────────────────────────
 # Main — Intake (uploads/URLs/paste)
 # ─────────────────────────────────────────────────────────
-st.title("Resume Workshop")
+st.title("Student Packet: Resume Workshop")
 
-st.subheader("Intake: Bring Your Stuff")
+st.subheader("0) Bring Your Stuff")
 c0a, c0b = st.columns(2)
 with c0a:
-    prev_resume_files = st.file_uploader(
-        "Previous resume (PDF/DOCX/TXT)", type=["pdf","docx","txt"], accept_multiple_files=True
-    )
+    prev_resume_files = st.file_uploader("Previous resume(s) (PDF/DOCX/TXT)", type=["pdf","docx","txt"], accept_multiple_files=True)
 with c0b:
-    jd_files = st.file_uploader(
-        "Job descriptions / postings (PDF/DOCX/TXT)", type=["pdf","docx","txt"], accept_multiple_files=True
-    )
+    jd_files = st.file_uploader("Job descriptions / postings (PDF/DOCX/TXT)", type=["pdf","docx","txt"], accept_multiple_files=True)
 
 st.markdown("**Or import by URL (public links only: Google Drive/GCS):**")
 url_list = st.text_area("One URL per line", "")
@@ -622,8 +698,7 @@ url_fetches = []
 if url_list.strip():
     for i, raw in enumerate(url_list.splitlines(), start=1):
         u = raw.strip()
-        if not u:
-            continue
+        if not u: continue
         nb = fetch_url_to_named_bytes(u, fallback_name=f"url_{i}")
         if nb is not None:
             url_fetches.append(nb)
@@ -652,46 +727,58 @@ if combined_text:
     st.info(f"Preview: {preview}…")
 
 # ─────────────────────────────────────────────────────────
-# Job Master & Role Detection
+# Autofill — parse and write into session state
 # ─────────────────────────────────────────────────────────
-ROLE_BULLETS = read_job_master()
-ALL_ROLES = list(ROLE_BULLETS.keys())
+if "autofilled" not in st.session_state:
+    st.session_state["autofilled"] = False
 
-detected_roles = detect_roles_from_text(combined_text, ALL_ROLES) if combined_text else []
-
-# ─────────────────────────────────────────────────────────
-# Autofill — header + certs + schools
-# ─────────────────────────────────────────────────────────
 def set_if_empty(key: str, val: str):
     if key not in st.session_state or not str(st.session_state.get(key,"")).strip():
         st.session_state[key] = val
 
-if st.button("Auto-Fill Header/Certs/Education from Text", type="secondary", disabled=(not combined_text)):
-    hdr = parse_header(combined_text)
+def autofill_from_text(text: str, trade_for_objective: str) -> Dict[str, Any]:
+    parsed: Dict[str, Any] = {"header":{}, "jobs":[], "schools":[], "certs":[], "skills_cat":{}}
+
+    hdr = parse_header(text)
+    parsed["header"] = hdr
     for k,v in {"Name":"Name","Phone":"Phone","Email":"Email","City":"City","State":"State"}.items():
         set_if_empty(v, hdr.get(k,""))
 
-    certs = parse_certs(combined_text)
-    if certs: set_if_empty("Certifications", ", ".join(sorted(certs)))
+    schools = parse_education(text)
+    parsed["schools"] = schools
+    for idx in range(1, MAX_SCHOOLS+1):
+        s = schools[idx-1] if idx-1 < len(schools) else {}
+        set_if_empty(f"Edu{idx}_School", s.get("school",""))
+        set_if_empty(f"Edu{idx}_CityState", s.get("details",""))
+        set_if_empty(f"Edu{idx}_Dates", s.get("year",""))
+        set_if_empty(f"Edu{idx}_Credential", s.get("credential",""))
 
-    schools = parse_education(combined_text)
-    if schools:
-        if len(schools) >= 1:
-            set_if_empty("Edu1_School", schools[0].get("school",""))
-            set_if_empty("Edu1_CityState", schools[0].get("details",""))
-            set_if_empty("Edu1_Dates", schools[0].get("year",""))
-            set_if_empty("Edu1_Credential", schools[0].get("credential",""))
-        if len(schools) >= 2:
-            set_if_empty("Edu2_School", schools[1].get("school",""))
-            set_if_empty("Edu2_CityState", schools[1].get("details",""))
-            set_if_empty("Edu2_Dates", schools[1].get("year",""))
-            set_if_empty("Edu2_Credential", schools[1].get("credential",""))
-    st.success("Autofill complete (Header / Certs / Education).")
+    certs = parse_certs(text)
+    parsed["certs"] = certs
+    if certs:
+        set_if_empty("Certifications", ", ".join(sorted(certs)))
+
+    # Suggested skills from text
+    sk_suggested = suggest_transferable_skills_from_text(text)
+    if sk_suggested:
+        set_if_empty("Skills_Transferable", ", ".join(sk_suggested))
+
+    parsed["skills_cat"] = categorize_skills(sk_suggested or [])
+
+    return parsed
+
+if st.button("Auto-Fill Header/Edu/Certs/Skills (from text)", type="secondary", disabled=(not combined_text)):
+    trade_for_obj = st.session_state.get("SelectedTrade", "Electrician – Inside (01)")
+    parsed_snapshot = autofill_from_text(combined_text, trade_for_obj)
+    st.session_state["autofilled"] = True
+    with st.expander("Autofill Debug (parsed snapshot)"):
+        st.write(parsed_snapshot)
+    st.success("Autofill complete. Review and edit as needed.")
 
 # ─────────────────────────────────────────────────────────
-# Build the Resume — UI
+# Workshop UI — build the resume (no “difference” section)
 # ─────────────────────────────────────────────────────────
-st.subheader("Header")
+st.subheader("1. Header")
 c1, c2 = st.columns(2)
 with c1:
     Name = st.text_input("Name", key="Name")
@@ -701,192 +788,173 @@ with c2:
     City = st.text_input("City", key="City")
     State = st.text_input("State (2-letter)", key="State")
 
-st.subheader("Objective")
+st.subheader("2. Objective")
 c3a, c3b = st.columns(2)
 with c3a:
-    application_type = st.radio("Target:", ["Apprenticeship","Job"], horizontal=True, index=0)
+    application_type = st.radio("Target", ["Apprenticeship","Job"], horizontal=True, index=0, key="TargetType")
     trade = st.selectbox("Trade target", TRADE_TAXONOMY, index=TRADE_TAXONOMY.index("Electrician – Inside (01)"), key="SelectedTrade")
 with c3b:
-    wk_pitch = st.text_input("10-second pitch (optional):", st.session_state.get("Pitch",""))
-    st.session_state["Pitch"] = wk_pitch
+    recos = build_objective_recommendations(st.session_state.get("TargetType","Apprenticeship"), st.session_state.get("SelectedTrade","Apprenticeship"))
+    st.markdown("**Suggested objective starters (click to copy):**")
+    for i, r in enumerate(recos, start=1):
+        if st.button(f"Use suggestion {i}", key=f"obj_suggestion_{i}"):
+            st.session_state["Objective_Final"] = r
+    wk_objective_final = st.text_area("Type your objective (1–2 sentences):", key="Objective_Final", placeholder="State your goal (apprenticeship or job), the trade, and what you bring (safety, pace, reliability).")
 
-# Recommendations (student must type final)
-suggest_text = []
-if application_type == "Apprenticeship":
-    suggest_text.append(f"Seeking entry into a registered apprenticeship in {trade}; bring safety habits, reliability, and hands-on readiness.")
-else:
-    suggest_text.append(f"Seeking full-time work in {trade}; ready for tool handling, safe production pace, and team support.")
+st.subheader("3. Skills")
+st.caption("Click suggestions to add; edit freely. We dedupe across buckets and cap totals.")
+suggested_from_text = suggest_transferable_skills_from_text(combined_text) if combined_text else []
+st.markdown(f"**Suggested (from text):** {', '.join(suggested_from_text) if suggested_from_text else '—'}")
+quick_transfer = st.multiselect("Quick Add (canon):", SKILL_CANON, default=suggested_from_text)
 
-suggest_text.append("Evidence over adjectives: include measurements, prints followed, tools used, and who verified (lead/foreman).")
-st.info("Suggested objective starters:\n- " + "\n- ".join(suggest_text))
-wk_objective_final = st.text_area("Type your objective (1–2 sentences):", st.session_state.get("Objective_Final",""))
-st.session_state["Objective_Final"] = wk_objective_final
-
-# ─────────────────────────────────────────────────────────
-# Skills (auto suggestions + editable)
-# ─────────────────────────────────────────────────────────
-st.subheader("Skills")
-suggested_from_text = suggest_transferable_skills_from_text(combined_text)
-st.caption("Click suggestions to add; edit freely.")
-
-# Suggestions panel
-with st.expander("Suggested skills from uploads and selected role bullets"):
-    st.write("From uploads:", ", ".join(suggested_from_text) if suggested_from_text else "(none yet)")
-    # We'll fill role-bullet-driven suggestions live below
-
-# Editable fields
 Skills_Transferable = st.text_area("Transferable (comma/newline):", st.session_state.get("Skills_Transferable",""))
 Skills_JobSpecific  = st.text_area("Job-Specific (comma/newline):", st.session_state.get("Skills_JobSpecific",""))
 Skills_SelfManagement = st.text_area("Self-Management (comma/newline):", st.session_state.get("Skills_SelfManagement",""))
 
-# Quick add from canon
-quick_transfer = st.multiselect("Quick Add: Transferable skills", SKILL_CANON, default=suggested_from_text)
+# Merge quick add into Transferable immediately (UI-level convenience)
 if quick_transfer:
-    merged = (Skills_Transferable + (", " if Skills_Transferable.strip() else "") + ", ".join(quick_transfer))
-    st.session_state["Skills_Transferable"] = merged
-    Skills_Transferable = merged
+    merged = split_list(st.session_state.get("Skills_Transferable","")) + list(quick_transfer)
+    dedup=[]; seen=set()
+    for s in merged:
+        lab=normalize_skill_label(s)
+        if lab.lower() in seen: continue
+        seen.add(lab.lower()); dedup.append(lab)
+    st.session_state["Skills_Transferable"] = ", ".join(dedup)
 
-# ─────────────────────────────────────────────────────────
-# Work Experience — Role picker + bullets → insert into Job 1/2/3
-# ─────────────────────────────────────────────────────────
-st.subheader("Work Experience — Role Library")
-colr1, colr2 = st.columns([1,2])
+st.subheader("4. Work Experience — Role Bullets & Duties")
+# Load job master
+roles_dict = cached_read_job_master(master_bytes)
+all_roles = list(roles_dict.keys())
+detected_roles = detect_roles_from_text(combined_text, all_roles) if combined_text and all_roles else []
 
-with colr1:
-    st.write("Detected roles (from uploads):")
-    if detected_roles:
-        st.write("• " + "\n• ".join(detected_roles))
-    else:
-        st.write("(none detected yet)")
+left, right = st.columns([1,2])
+with left:
+    st.markdown("**Detected/Available roles**")
+    role_tabs = st.tabs(["Detected"] + ["All"])
+    with role_tabs[0]:
+        if detected_roles:
+            for r in detected_roles:
+                st.markdown(f"- {r}")
+        else:
+            st.caption("No roles detected from text.")
+    with role_tabs[1]:
+        for r in all_roles[:200]:
+            st.markdown(f"- {r}")
 
-    chosen_roles = st.multiselect("Select roles to pull duty bullets from (you can add more):",
-                                  options=ALL_ROLES,
-                                  default=detected_roles[:5])
+with right:
+    st.markdown("**Click bullets to insert into Job 1/2/3 duties. Skills may be inferred on insert.**")
+    role_pick = st.selectbox("Pick a role to view bullets", options=(detected_roles or all_roles), index=0 if (detected_roles or all_roles) else 0)
+    bullets = roles_dict.get(role_pick, [])
+    # Track inferred skills from clicks in session
+    if "InferredSkills" not in st.session_state:
+        st.session_state["InferredSkills"] = set()
 
-with colr2:
-    target_job = st.radio("Insert bullets into:", ["Job 1","Job 2","Job 3"], horizontal=True, index=0)
-    target_key = {"Job 1":"Job1_Duties","Job 2":"Job2_Duties","Job 3":"Job3_Duties"}[target_job]
+    # Duties editors
+    J1du = st.text_area("Job 1 – Duties (1–4 bullets):", key="Job1_Duties", height=120)
+    J2du = st.text_area("Job 2 – Duties (1–4 bullets):", key="Job2_Duties", height=120)
+    J3du = st.text_area("Job 3 – Duties (1–4 bullets):", key="Job3_Duties", height=120)
 
-    # Ensure duty fields exist
-    for k in ["Job1_Duties","Job2_Duties","Job3_Duties"]:
-        st.session_state.setdefault(k, "")
+    # Clickable bullets
+    cols = st.columns(3)
+    for i,b in enumerate(bullets):
+        col = cols[i % 3]
+        if col.button(f"➕ {b}", key=f"addbullet_{role_pick}_{i}"):
+            # Insert into the first job with < 4 bullets
+            def current_count(txt: str) -> int:
+                return len([ln for ln in (txt or "").splitlines() if ln.strip()])
+            targets = ["Job1_Duties","Job2_Duties","Job3_Duties"]
+            for tkey in targets:
+                txt = st.session_state.get(tkey,"")
+                cnt = current_count(txt)
+                if cnt < MAX_BULLETS_PER_JOB:
+                    newline = ("\n" if txt.strip() else "")
+                    st.session_state[tkey] = (txt + newline + b)
+                    # infer skills only on insert
+                    inferred = skills_from_bullets([b])
+                    st.session_state["InferredSkills"].update(inferred)
+                    break
 
-    role_selected = st.selectbox("Pick a role to view bullets", ["(choose)"] + chosen_roles)
-    if role_selected != "(choose)":
-        bullets = ROLE_BULLETS.get(role_selected, [])
-        st.write("Click a bullet to insert:")
-        cols = st.columns(2)
-        for i, b in enumerate(bullets):
-            if cols[i % 2].button("• " + b, key=f"ins_{role_selected}_{i}"):
-                current = st.session_state.get(target_key, "")
-                lines = [ln for ln in current.splitlines() if ln.strip()]
-                if b not in lines:
-                    lines.append(b)
-                st.session_state[target_key] = "\n".join(lines[:MAX_BULLETS_PER_JOB])
+    # Show inferred skills and allow add to Job-Specific bucket
+    if st.session_state["InferredSkills"]:
+        inf_list = sorted(st.session_state["InferredSkills"])
+        st.info("Inferred job-specific skills from inserted bullets: " + ", ".join(inf_list))
+        if st.button("Add inferred skills to Job-Specific"):
+            merged = split_list(st.session_state.get("Skills_JobSpecific","")) + inf_list
+            dedup=[]; seen=set()
+            for s in merged:
+                lab=normalize_skill_label(s)
+                if lab.lower() in seen: continue
+                seen.add(lab.lower()); dedup.append(lab)
+            st.session_state["Skills_JobSpecific"] = ", ".join(dedup)
+            st.success("Added to Job-Specific skills.")
 
-        # Skills from chosen bullets
-        suggested_from_bullets = skills_from_bullets(bullets)
-        if suggested_from_bullets:
-            st.caption("Skills inferred from this role’s bullets: " + ", ".join(sorted(set(suggested_from_bullets))))
-            # Pre-merge to Job-Specific by default; student can move/edit
-            merged_js = (st.session_state.get("Skills_JobSpecific","") + (", " if st.session_state.get("Skills_JobSpecific","").strip() else "") + ", ".join(suggested_from_bullets)).strip(", ")
-            st.session_state["Skills_JobSpecific"] = merged_js
+# Job details (company, titles, dates, city/state)
+st.subheader("5. Work Experience — Details")
+for n in [1,2,3]:
+    st.markdown(f"**Job {n}**")
+    cA,cB,cC = st.columns(3)
+    with cA:
+        st.text_input(f"Company {n}:", key=f"Job{n}_Company")
+        st.text_input(f"Title {n}:", key=f"Job{n}_Title")
+    with cB:
+        st.text_input(f"Dates {n} (e.g., 2023-06 – Present):", key=f"Job{n}_Dates")
+        st.text_input(f"City/State {n}:", key=f"Job{n}_CityState")
+    with cC:
+        pass  # spacing
 
-# Jobs 1–3 fields
-st.subheader("Work Experience — Jobs")
-def job_block(n: int):
-    c1,c2 = st.columns(2)
-    with c1:
-        st.text_input(f"Job {n} – Company:", key=f"Job{n}_Company")
-        st.text_input(f"Job {n} – Dates (e.g., 2023-06 – Present):", key=f"Job{n}_Dates")
-    with c2:
-        st.text_input(f"Job {n} – City/State:", key=f"Job{n}_CityState")
-        st.text_input(f"Job {n} – Title:", key=f"Job{n}_Title")
-    st.text_area(f"Job {n} – Duties/Accomplishments (1–4 bullets):", key=f"Job{n}_Duties", height=110)
-
-job_block(1)
-job_block(2)
-job_block(3)
-
-# ─────────────────────────────────────────────────────────
-# Certifications / Education
-# ─────────────────────────────────────────────────────────
-st.subheader("Certifications")
+# Certifications
+st.subheader("6. Certifications")
 Certifications = st.text_area(
     "List certifications (comma/newline). If none, write 'None yet' or what you plan to get.",
-    st.session_state.get("Certifications","OSHA-10, Flagger (WA), Forklift operator (employer evaluation on hire)")
+    st.session_state.get("Certifications","OSHA Outreach 10-Hour (Construction), WA Flagger (expires 3 years from issuance), Forklift — employer evaluation on hire")
 )
 
-st.subheader("Education")
+# Education
+st.subheader("7. Education")
 st.write("Reverse order. Include city/state, dates, and credential/diploma.")
 E1s = st.text_input("School/Program 1:", key="Edu1_School"); E1cs = st.text_input("City/State 1:", key="Edu1_CityState")
 E1d = st.text_input("Dates 1:", key="Edu1_Dates"); E1c = st.text_input("Certificate/Diploma 1:", key="Edu1_Credential")
 E2s = st.text_input("School/Program 2:", key="Edu2_School"); E2cs = st.text_input("City/State 2:", key="Edu2_CityState")
 E2d = st.text_input("Dates 2:", key="Edu2_Dates"); E2c = st.text_input("Certificate/Diploma 2:", key="Edu2_Credential")
 
-st.markdown("**Final Checklist**")
-st.markdown("""
-- [ ] One page only  
-- [ ] Professional font (10–12 pt)  
-- [ ] Saved as PDF  
-- [ ] Reviewed by peer  
-- [ ] Reviewed by instructor  
-""")
-
-# ─────────────────────────────────────────────────────────
-# Cover Letter (optional)
-# ─────────────────────────────────────────────────────────
-st.markdown("---")
-st.subheader("Cover Letter (optional)")
-CL_Company = st.text_input("Company/Employer:","")
-CL_Role    = st.text_input("Role Title:", f"{st.session_state.get('SelectedTrade','Apprenticeship')} apprentice")
-CL_Location= st.text_input("Company Location (City, State):","")
-CL_Highlights = st.text_area("Optional: bullet highlights (comma/newline/• allowed):","Reliable • Safety-focused • Coachable")
-
 # ─────────────────────────────────────────────────────────
 # Generate Docs
 # ─────────────────────────────────────────────────────────
+st.markdown("---")
+st.subheader("Generate")
 if st.button("Generate Resume + Cover Letter + Instructor Packet", type="primary"):
+    Name = st.session_state.get("Name","")
+    Phone = st.session_state.get("Phone","")
+    Email = st.session_state.get("Email","")
+    City = st.session_state.get("City","")
+    State = st.session_state.get("State","")
     problems=[]
-    if not st.session_state.get("Name","").strip():
-        problems.append("Name is required.")
-    if not (st.session_state.get("Phone","").strip() or st.session_state.get("Email","").strip()):
-        problems.append("At least one contact method (Phone or Email) is required.")
+    if not Name.strip(): problems.append("Name is required.")
+    if not (Phone.strip() or Email.strip()): problems.append("At least one contact method (Phone or Email) is required.")
     if problems:
         st.error(" | ".join(problems))
         st.stop()
 
-    # Build form dict
     trade = st.session_state.get("SelectedTrade","Electrician – Inside (01)")
-    # Merge Quick Add into Transferable
-    skills_transfer_final = st.session_state.get("Skills_Transferable","")
-    if quick_transfer:
-        skills_transfer_final = (skills_transfer_final + (", " if skills_transfer_final.strip() else "") + ", ".join(quick_transfer))
-
+    # Merge skills (keep caps/dedup/cap total later in build)
     form = {
-        "Name": st.session_state.get("Name",""), "City": st.session_state.get("City",""), "State": st.session_state.get("State",""),
-        "Phone": st.session_state.get("Phone",""), "Email": st.session_state.get("Email",""),
+        "Name": Name, "City": City, "State": State,
+        "Phone": Phone, "Email": Email,
         "Objective_Final": st.session_state.get("Objective_Final",""),
-        "Skills_Transferable": skills_transfer_final,
+        "Skills_Transferable": st.session_state.get("Skills_Transferable",""),
         "Skills_JobSpecific": st.session_state.get("Skills_JobSpecific",""),
         "Skills_SelfManagement": st.session_state.get("Skills_SelfManagement",""),
         "Certifications": st.session_state.get("Certifications", Certifications),
     }
     # Jobs
-    for i in (1,2,3):
+    for i in [1,2,3]:
         form[f"Job{i}_Company"]=st.session_state.get(f"Job{i}_Company","")
         form[f"Job{i}_CityState"]=st.session_state.get(f"Job{i}_CityState","")
         form[f"Job{i}_Dates"]=st.session_state.get(f"Job{i}_Dates","")
         form[f"Job{i}_Title"]=st.session_state.get(f"Job{i}_Title","")
         form[f"Job{i}_Duties"]=st.session_state.get(f"Job{i}_Duties","")
-    # Education
-    for i in (1,2):
-        form[f"Edu{i}_School"]=st.session_state.get(f"Edu{i}_School","")
-        form[f"Edu{i}_CityState"]=st.session_state.get(f"Edu{i}_CityState","")
-        form[f"Edu{i}_Dates"]=st.session_state.get(f"Edu{i}_Dates","")
-        form[f"Edu{i}_Credential"]=st.session_state.get(f"Edu{i}_Credential","")
 
-    # Resume
+    # Resume via template
     if not tpl_bytes:
         st.error("Template not found. Put resume_app_template.docx in the repo or upload it in the sidebar.")
         st.stop()
@@ -897,26 +965,32 @@ if st.button("Generate Resume + Cover Letter + Instructor Packet", type="primary
         st.error(f"Resume template rendering failed: {e}")
         st.stop()
 
-    # Cover Letter
+    # Cover letter
+    CL_Company = ""  # student can edit after download; keep minimal fields here
+    CL_Role = f"{st.session_state.get('SelectedTrade','Apprenticeship')} apprentice" if st.session_state.get("TargetType","Apprenticeship")=="Apprenticeship" else f"Entry-level {st.session_state.get('SelectedTrade','')}"
+    CL_Location= ""
+    CL_Highlights = "Reliable, Safety-focused, Coachable"
     cover_bytes = build_cover_letter_docx({
-        "name": form["Name"], "city": form["City"], "state": form["State"], "phone": clean_phone(form["Phone"]), "email": clean_email(form["Email"]),
+        "name": Name, "city": City, "state": State, "phone": clean_phone(Phone), "email": clean_email(Email),
         "company": CL_Company, "role": CL_Role, "location": CL_Location,
         "trade_label": trade, "strength": CL_Highlights,
-        "application_type": application_type,
+        "application_type": st.session_state.get("TargetType","Apprenticeship"),
     })
 
-    # Instructor Packet (Workshop reflections + full text of docs)
+    # Instructor Packet (reflections minimal) + full text of docs
     reflections = {
-        "Objective (student typed)": st.session_state.get("Objective_Final",""),
-        "Pitch (optional)": st.session_state.get("Pitch",""),
+        "Objective typed by student": st.session_state.get("Objective_Final",""),
+        "Skills (transferable)": st.session_state.get("Skills_Transferable",""),
+        "Skills (job-specific)": st.session_state.get("Skills_JobSpecific",""),
+        "Skills (self-management)": st.session_state.get("Skills_SelfManagement",""),
     }
     merged_docs_for_packet = list(pathway_uploads or []) \
                            + list(prev_resume_files or []) \
                            + list(jd_files or []) \
                            + url_fetches
-    packet_bytes = build_pathway_packet_docx({"name": form["Name"]}, trade, application_type, merged_docs_for_packet, reflections)
+    packet_bytes = build_pathway_packet_docx({"name": Name}, trade, st.session_state.get("TargetType","Apprenticeship"), merged_docs_for_packet, reflections)
 
-    safe_name = (form["Name"] or "Student").replace(" ","_")
+    safe_name = (Name or "Student").replace(" ","_")
     st.download_button("Download Resume (DOCX)", data=resume_bytes,
                        file_name=f"{safe_name}_Resume.docx",
                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -930,7 +1004,7 @@ if st.button("Generate Resume + Cover Letter + Instructor Packet", type="primary
                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                        use_container_width=True)
 
-    # Intake CSV — fixed column order
+    # Intake CSV (ordered fields)
     csv_fields = [
         "Name","City","State","Phone","Email",
         "Objective_Final",
@@ -943,8 +1017,8 @@ if st.button("Generate Resume + Cover Letter + Instructor Packet", type="primary
         "Edu2_School","Edu2_CityState","Edu2_Dates","Edu2_Credential"
     ]
     buf=io.StringIO(); w=csv.writer(buf)
-    w.writerow(csv_fields); w.writerow([form.get(k,"") for k in csv_fields])
+    w.writerow(csv_fields); w.writerow([st.session_state.get(k,"") for k in csv_fields])
     st.download_button("Download Intake CSV", data=buf.getvalue().encode("utf-8"),
                        file_name=f"{safe_name}_Workshop_Intake.csv", mime="text/csv",
                        use_container_width=True)
-    st.success("Generated.")
+    st.success("Generated. Header/Edu/Certs/Skills parsed; duties inserted; objective remains student-typed (with recommendations).")
