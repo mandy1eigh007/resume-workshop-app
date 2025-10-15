@@ -1,8 +1,22 @@
+--only-binary=:all:
+pip==24.2
+setuptools==71.1.0
+wheel==0.44.0
+
+# Core
 streamlit==1.36.0
+
+# Pandas needs a compatible NumPy wheel; pin it to avoid source builds
+numpy==1.26.4
 pandas==2.2.2
+
+# DOCX + templating
 docxtpl==0.16.7
 python-docx==0.8.11
 lxml==5.2.1
+
+# PDF text
 pypdf==4.2.0
+
+# Fetch public URLs
 requests==2.32.3
-pdfminer.six==20231228
