@@ -5,3 +5,4 @@ python-docx==0.8.11
 lxml==5.2.1
 pypdf==4.2.0
 requests==2.32.3
+pdfminer.six==20231228
