@@ -5,16 +5,17 @@ wheel==0.44.0
 streamlit==1.36.0
 requests==2.32.3
 
-# Text + docs
+# DOCX stack
 docxtpl==0.16.7
 python-docx==0.8.11
-lxml==5.3.0
+lxml==5.3.0   # has manylinux wheels for Py3.11; avoids compiling
 
 # PDF text
 pypdf==4.2.0
 pdfminer.six==20231228
 
-# If you truly don't use pandas in app.py, leave it out.
-# If you do use it (e.g., for CSV export), pin to versions with manylinux wheels on 3.11:
+# Only include pandas if you actually use it in app.py.
+# The CSV export in our code uses Python's csv module, not pandas.
+# If you DO need pandas, keep these two pins (compatible wheels on 3.11):
 numpy==1.26.4
 pandas==2.2.2
