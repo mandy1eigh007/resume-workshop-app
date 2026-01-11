@@ -1,0 +1,62 @@
+name: resume_workshop_mobile
+description: Seattle Tri-County Construction Resume & Pathway Workshop Mobile App
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  
+  # UI Components
+  cupertino_icons: ^1.0.2
+  flutter_svg: ^2.0.9
+  
+  # State Management
+  provider: ^6.1.1
+  
+  # Local Storage
+  shared_preferences: ^2.2.2
+  sqflite: ^2.3.0
+  path_provider: ^2.1.1
+  
+  # File Handling
+  file_picker: ^6.1.1
+  image_picker: ^1.0.5
+  permission_handler: ^11.1.0
+  
+  # Document Generation
+  pdf: ^3.10.7
+  printing: ^5.11.1
+  
+  # Networking (for future API integration)
+  http: ^1.1.2
+  
+  # Date/Time
+  intl: ^0.18.1
+  
+  # Utils
+  uuid: ^4.2.1
+  path: ^1.8.3
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.1
+
+flutter:
+  uses-material-design: true
+  
+  assets:
+    - assets/images/
+    - assets/data/
+    - assets/templates/
+  
+  fonts:
+    - family: Roboto
+      fonts:
+        - asset: assets/fonts/Roboto-Regular.ttf
+        - asset: assets/fonts/Roboto-Bold.ttf
+          weight: 700
