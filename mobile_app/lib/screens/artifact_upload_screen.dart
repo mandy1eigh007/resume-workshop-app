@@ -4,6 +4,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
 import '../models/artifact.dart';
 import '../providers/artifact_provider.dart';
+import '../providers/content_master_provider.dart';
 
 class ArtifactUploadScreen extends StatefulWidget {
   const ArtifactUploadScreen({super.key});
@@ -30,11 +31,13 @@ class _ArtifactUploadScreenState extends State<ArtifactUploadScreen> {
         title: const Text('Upload Evidence'),
         subtitle: const Text('Files, Photos (No Faces), Certificates'),
       ),
-      body: Consumer<ArtifactProvider>(
-        builder: (context, artifactProvider, _) {
+      body: Consumer2<ArtifactProvider, ContentMasterProvider>(
+        builder: (context, artifactProvider, contentProvider, _) {
           if (artifactProvider.isLoading) {
             return const Center(child: CircularProgressIndicator());
           }
+
+          final templates = contentProvider.getArtifactTemplates();
 
           return Column(
             children: [
@@ -66,6 +69,55 @@ class _ArtifactUploadScreenState extends State<ArtifactUploadScreen> {
                       ),
                     ),
                     const SizedBox(height: 16),
+                    
+                    // Display artifact templates if available
+                    if (templates.isNotEmpty) ...[
+                      const Text(
+                        'Artifact Templates (from CONTENT_MASTER.md):',
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                      ),
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        height: 120,
+                        child: ListView.builder(
+                          scrollDirection: Axis.horizontal,
+                          itemCount: templates.length,
+                          itemBuilder: (context, index) {
+                            final template = templates[index];
+                            return Card(
+                              margin: const EdgeInsets.only(right: 8),
+                              child: Container(
+                                width: 200,
+                                padding: const EdgeInsets.all(8),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      template.name,
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 12,
+                                      ),
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Expanded(
+                                      child: Text(
+                                        '${template.fields.length} fields required',
+                                        style: const TextStyle(fontSize: 10, color: Colors.grey),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                    ],
+                    
                     Row(
                       children: [
                         Expanded(
