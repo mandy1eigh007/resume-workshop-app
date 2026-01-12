@@ -5,19 +5,31 @@ import 'providers/resume_provider.dart';
 import 'providers/artifact_provider.dart';
 import 'providers/progress_provider.dart';
 import 'providers/quick_win_provider.dart';
+import 'providers/content_master_provider.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  runApp(const ResumeWorkshopApp());
+  
+  // Initialize ContentMasterProvider and load content
+  final contentMasterProvider = ContentMasterProvider();
+  await contentMasterProvider.loadContent();
+  
+  runApp(ResumeWorkshopApp(contentMasterProvider: contentMasterProvider));
 }
 
 class ResumeWorkshopApp extends StatelessWidget {
-  const ResumeWorkshopApp({super.key});
+  final ContentMasterProvider contentMasterProvider;
+  
+  const ResumeWorkshopApp({
+    super.key,
+    required this.contentMasterProvider,
+  });
 
   @override
   Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
+        ChangeNotifierProvider.value(value: contentMasterProvider),
         ChangeNotifierProvider(create: (_) => ResumeProvider()),
         ChangeNotifierProvider(create: (_) => ArtifactProvider()),
         ChangeNotifierProvider(create: (_) => ProgressProvider()),

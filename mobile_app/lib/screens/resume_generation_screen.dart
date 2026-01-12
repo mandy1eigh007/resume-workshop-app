@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/resume.dart';
 import '../providers/resume_provider.dart';
+import '../providers/content_master_provider.dart';
 import '../widgets/measurable_bullet_form.dart';
 import '../widgets/skills_selector.dart';
 
@@ -20,6 +21,9 @@ class _ResumeGenerationScreenState extends State<ResumeGenerationScreen> {
   final _cityController = TextEditingController();
   final _stateController = TextEditingController(text: 'WA');
   final _objectiveController = TextEditingController();
+  
+  String? _selectedTrade;
+  String? _selectedObjective;
 
   @override
   void dispose() {
@@ -126,23 +130,93 @@ class _ResumeGenerationScreenState extends State<ResumeGenerationScreen> {
                   ),
                   const SizedBox(height: 24),
                   const Text(
-                    'Objective (Optional)',
+                    'Objective',
                     style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 8),
                   const Text(
-                    'Focus on apprenticeship or job goals. Keep it specific and measurable.',
+                    'Select a trade and choose from pre-approved objective starters, or write your own.',
                     style: TextStyle(fontSize: 12, color: Colors.grey),
                   ),
-                  const SizedBox(height: 8),
-                  TextFormField(
-                    controller: _objectiveController,
-                    decoration: const InputDecoration(
-                      hintText:
-                          'Seeking electrical apprenticeship to apply OSHA-10 training...',
-                      border: OutlineInputBorder(),
-                    ),
-                    maxLines: 3,
+                  const SizedBox(height: 12),
+                  Consumer<ContentMasterProvider>(
+                    builder: (context, contentProvider, _) {
+                      if (!contentProvider.isLoaded) {
+                        return const Card(
+                          child: Padding(
+                            padding: EdgeInsets.all(16),
+                            child: Text('Loading objective options...'),
+                          ),
+                        );
+                      }
+                      
+                      final trades = contentProvider.getAvailableTrades();
+                      
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          if (trades.isNotEmpty) ...[
+                            DropdownButtonFormField<String>(
+                              value: _selectedTrade,
+                              decoration: const InputDecoration(
+                                labelText: 'Select Trade (Optional)',
+                                border: OutlineInputBorder(),
+                                prefixIcon: Icon(Icons.construction),
+                              ),
+                              items: [
+                                const DropdownMenuItem(
+                                  value: null,
+                                  child: Text('-- Select a trade --'),
+                                ),
+                                ...trades.map((trade) => DropdownMenuItem(
+                                      value: trade,
+                                      child: Text(trade),
+                                    )),
+                              ],
+                              onChanged: (value) {
+                                setState(() {
+                                  _selectedTrade = value;
+                                  _selectedObjective = null;
+                                  _objectiveController.clear();
+                                });
+                              },
+                            ),
+                            const SizedBox(height: 12),
+                          ],
+                          if (_selectedTrade != null) ...[
+                            DropdownButtonFormField<String>(
+                              value: _selectedObjective,
+                              decoration: const InputDecoration(
+                                labelText: 'Choose Objective Starter',
+                                border: OutlineInputBorder(),
+                                prefixIcon: Icon(Icons.lightbulb_outline),
+                              ),
+                              items: _buildObjectiveDropdownItems(contentProvider),
+                              onChanged: (value) {
+                                setState(() {
+                                  _selectedObjective = value;
+                                  _objectiveController.text = value ?? '';
+                                });
+                              },
+                            ),
+                            const SizedBox(height: 12),
+                          ],
+                          TextFormField(
+                            controller: _objectiveController,
+                            decoration: InputDecoration(
+                              labelText: _selectedTrade == null 
+                                  ? 'Write Your Own Objective (Optional)'
+                                  : 'Edit Objective (Optional)',
+                              hintText: _selectedTrade == null
+                                  ? 'Seeking electrical apprenticeship to apply OSHA-10 training...'
+                                  : 'Customize the selected objective...',
+                              border: const OutlineInputBorder(),
+                            ),
+                            maxLines: 3,
+                          ),
+                        ],
+                      );
+                    },
                   ),
                   const SizedBox(height: 24),
                   const Text(
@@ -222,6 +296,68 @@ class _ResumeGenerationScreenState extends State<ResumeGenerationScreen> {
         },
       ),
     );
+  }
+  
+  List<DropdownMenuItem<String>> _buildObjectiveDropdownItems(
+    ContentMasterProvider contentProvider,
+  ) {
+    if (_selectedTrade == null) return [];
+    
+    final objectives = contentProvider.getObjectivesForTrade(_selectedTrade!);
+    if (objectives == null) return [];
+    
+    final items = <DropdownMenuItem<String>>[
+      const DropdownMenuItem(
+        value: null,
+        child: Text('-- Choose an objective --'),
+      ),
+    ];
+    
+    // Add apprenticeship objectives
+    if (objectives.apprenticeshipObjectives.isNotEmpty) {
+      items.add(const DropdownMenuItem(
+        enabled: false,
+        value: null,
+        child: Text(
+          'Apprenticeship Objectives:',
+          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+        ),
+      ));
+      
+      for (final objective in objectives.apprenticeshipObjectives) {
+        items.add(DropdownMenuItem(
+          value: objective,
+          child: Text(
+            objective.length > 60 ? '${objective.substring(0, 60)}...' : objective,
+            style: const TextStyle(fontSize: 12),
+          ),
+        ));
+      }
+    }
+    
+    // Add job objectives
+    if (objectives.jobObjectives.isNotEmpty) {
+      items.add(const DropdownMenuItem(
+        enabled: false,
+        value: null,
+        child: Text(
+          'Job Objectives:',
+          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+        ),
+      ));
+      
+      for (final objective in objectives.jobObjectives) {
+        items.add(DropdownMenuItem(
+          value: objective,
+          child: Text(
+            objective.length > 60 ? '${objective.substring(0, 60)}...' : objective,
+            style: const TextStyle(fontSize: 12),
+          ),
+        ));
+      }
+    }
+    
+    return items;
   }
 
   Widget _buildWorkExperienceCard(
