@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/resume.dart';
 import '../providers/resume_provider.dart';
+import '../providers/content_master_provider.dart';
 
 class MeasurableBulletForm extends StatefulWidget {
   const MeasurableBulletForm({super.key});
@@ -16,6 +17,9 @@ class _MeasurableBulletFormState extends State<MeasurableBulletForm> {
   final _quantityController = TextEditingController();
   final _safetyController = TextEditingController();
   final _verificationController = TextEditingController();
+  
+  String? _selectedRole;
+  bool _showRoleSuggestions = false;
 
   @override
   void dispose() {
@@ -48,6 +52,80 @@ class _MeasurableBulletFormState extends State<MeasurableBulletForm> {
                 ),
               ),
               const SizedBox(height: 16),
+              
+              // Role selector for suggestions
+              Consumer<ContentMasterProvider>(
+                builder: (context, contentProvider, _) {
+                  if (!contentProvider.isLoaded) {
+                    return const SizedBox.shrink();
+                  }
+                  
+                  final roles = contentProvider.getAvailableRoles();
+                  
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              'Role-Based Suggestions',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.grey[700],
+                              ),
+                            ),
+                          ),
+                          Switch(
+                            value: _showRoleSuggestions,
+                            onChanged: (value) {
+                              setState(() {
+                                _showRoleSuggestions = value;
+                                if (!value) {
+                                  _selectedRole = null;
+                                }
+                              });
+                            },
+                          ),
+                        ],
+                      ),
+                      if (_showRoleSuggestions && roles.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        DropdownButtonFormField<String>(
+                          value: _selectedRole,
+                          decoration: const InputDecoration(
+                            labelText: 'Select Role for Examples',
+                            border: OutlineInputBorder(),
+                            contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          ),
+                          items: [
+                            const DropdownMenuItem(
+                              value: null,
+                              child: Text('-- Select a role --'),
+                            ),
+                            ...roles.map((role) => DropdownMenuItem(
+                                  value: role,
+                                  child: Text(role, style: const TextStyle(fontSize: 12)),
+                                )),
+                          ],
+                          onChanged: (value) {
+                            setState(() {
+                              _selectedRole = value;
+                            });
+                          },
+                        ),
+                        if (_selectedRole != null) ...[
+                          const SizedBox(height: 8),
+                          _buildRoleBulletSuggestions(contentProvider),
+                        ],
+                      ],
+                      const SizedBox(height: 16),
+                    ],
+                  );
+                },
+              ),
+              
               TextFormField(
                 controller: _actionController,
                 decoration: const InputDecoration(
@@ -91,17 +169,6 @@ class _MeasurableBulletFormState extends State<MeasurableBulletForm> {
                 validator: (value) => 
                     value?.isEmpty ?? true ? 'Required' : null,
               ),
-              const SizedBox(height: 16),
-              const Text(
-                'Examples:',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
-              ),
-              const SizedBox(height: 4),
-              const Text(
-                '• "Cut and set 30+ ft of conduit per mark; verified offsets with level; QC\'d by lead before pull."\n'
-                '• "Loaded/unloaded 20+ pallets; strapped and tagged; kept walkways clear per JHA."',
-                style: TextStyle(fontSize: 11, fontStyle: FontStyle.italic),
-              ),
             ],
           ),
         ),
@@ -116,6 +183,54 @@ class _MeasurableBulletFormState extends State<MeasurableBulletForm> {
           child: const Text('Add Bullet'),
         ),
       ],
+    );
+  }
+  
+  Widget _buildRoleBulletSuggestions(ContentMasterProvider contentProvider) {
+    final bullets = contentProvider.getBulletsForRole(_selectedRole!);
+    
+    if (bullets.isEmpty) {
+      return const Card(
+        child: Padding(
+          padding: EdgeInsets.all(8),
+          child: Text(
+            'No bullet examples available for this role.',
+            style: TextStyle(fontSize: 11, color: Colors.grey),
+          ),
+        ),
+      );
+    }
+    
+    return Card(
+      color: Colors.green[50],
+      child: Padding(
+        padding: const EdgeInsets.all(8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Example bullets for $_selectedRole:',
+              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 4),
+            ...bullets.take(3).map((bullet) => Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(
+                    '• $bullet',
+                    style: const TextStyle(fontSize: 10, fontStyle: FontStyle.italic),
+                  ),
+                )),
+            if (bullets.length > 3)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  '... and ${bullets.length - 3} more',
+                  style: const TextStyle(fontSize: 10, color: Colors.grey),
+                ),
+              ),
+          ],
+        ),
+      ),
     );
   }
 
