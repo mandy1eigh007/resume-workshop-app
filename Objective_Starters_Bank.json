@@ -1,0 +1,420 @@
+{
+  "objectiveStarters": {
+    "Boilermaker": {
+      "apprenticeship": [
+        "Seeking structured training to assemble, fit, and torque pressure-rated components to spec; day-one focus on safety, rigging signals, and QA logs.",
+        "Ready to learn vessel prep, cutting, and basic weld support while maintaining housekeeping and drop-zone control checklists.",
+        "Motivated to read isometrics with guidance, track parts/heat numbers, and document fit-up measurements.",
+        "Committed to safe material handling, confined-space awareness, and tool control; want progressive responsibility with supervision.",
+        "Aim to support experienced crews on staging, bolting, and gasket installs with accurate counts and sign-offs."
+      ],
+      "job": [
+        "Can stage parts, read basic marks, and torque fasteners to spec with recorded readings; strong housekeeping.",
+        "Support welding teams by prepping joints, purging, and logging fit-up dimensions; maintain consumable inventory.",
+        "Run hand tools safely, measure cuts, and verify edges; maintain rigging signal practice logs.",
+        "Track mill certs/heat numbers with accuracy; complete checklists and report variances.",
+        "Manage debris and egress protection; keep pace with part flow and QA sign-offs."
+      ]
+    },
+    "Bricklayer / BAC Allied (Brick/Tile/Terrazzo/Marble/PCC)": {
+      "apprenticeship": [
+        "Train to mix, stage, and lay units to line/level with joint uniformity; log production counts.",
+        "Learn layout from control lines and maintain continuous mortar quality checks.",
+        "Assist with cutting, back-buttering, and setting per pattern; document square footage set.",
+        "Maintain saw safety, dust control, and cleanup to inspection standards.",
+        "Support grouting and cleanup with verified dilution and dwell times."
+      ],
+      "job": [
+        "Stage materials and maintain mortar/plasticity checks; record batch times and set area.",
+        "Cut/fit pieces to tolerance, verify lines, and keep blade logs.",
+        "Track piece counts and waste; protect adjacent finishes.",
+        "Maintain water management and cleanup standards; capture photos (no faces).",
+        "Read simple layout marks and keep daily production notes."
+      ]
+    },
+    "Carpenter (General)": {
+      "apprenticeship": [
+        "Learn layout, framing, and fastening to prints; log measurements, fastener counts, and inspections.",
+        "Support crews with material takeoff, cut lists, and staging while maintaining egress protection.",
+        "Practice saw setup, blade checks, and cut accuracy within ±1/16\" under supervision.",
+        "Learn temporary protection and housekeeping that pass walk-through.",
+        "Document daily tasks with quantities and tool inspections."
+      ],
+      "job": [
+        "Read simple prints, measure, and fasten to tolerance; maintain tool control layout.",
+        "Stage lumber/hardware, track counts, and protect egress; capture checklists.",
+        "Install blocking, bracing, and sheathing with nail schedule compliance.",
+        "Maintain saw/bit logs and blade change records.",
+        "Complete punch-list items with documentation."
+      ]
+    },
+    "Carpenter – Interior Systems": {
+      "apprenticeship": [
+        "Learn layout for track/stud, hang board, and maintain screw patterns per spec.",
+        "Support acoustical/grid installs, verify level, and document tile counts.",
+        "Practice cut accuracy on openings; protect MEP penetrations.",
+        "Maintain laser and tool calibration logs.",
+        "Stage materials for pace without blocking egress."
+      ],
+      "job": [
+        "Frame, hang, and finish per schedule/spacing; log quantities installed.",
+        "Maintain plumb/level records; submit daily notes.",
+        "Cut around penetrations to tolerance; capture photos (no faces).",
+        "Keep blade/bit inventories; verify anchors to spec.",
+        "Protect finishes; maintain cleanup logs."
+      ]
+    },
+    "Millwright": {
+      "apprenticeship": [
+        "Learn precision alignment, shimming, torquing, and documentation.",
+        "Learn rigging with signal practice logs and hardware inspections.",
+        "Support machinery installs with base leveling and grout prep.",
+        "Track part numbers and service intervals.",
+        "Follow lockout/tagout and maintain checklist sign-offs."
+      ],
+      "job": [
+        "Assist with laser alignment and document readings.",
+        "Torque and re-check per procedure; record values.",
+        "Stage fasteners, gaskets, and tools; verify counts.",
+        "Maintain lubrication charts.",
+        "Housekeeping and egress protection to inspection standards."
+      ]
+    },
+    "Pile Driver": {
+      "apprenticeship": [
+        "Learn pile layout, splicing prep, and hammer safety; log rigging checks.",
+        "Maintain fall-zone and drop-zone control checklists.",
+        "Track blow counts and embed depths with supervision.",
+        "Inspect slings/shackles; record tags and dates.",
+        "Support cut-off and cap installs to spec."
+      ],
+      "job": [
+        "Stage piles, verify marks, and assist with alignment.",
+        "Maintain exclusion zones; document signage.",
+        "Record blow counts/depths daily.",
+        "Inspect rigging and log replacements.",
+        "Keep debris clear; protect waterways where required."
+      ]
+    },
+    "Cement Mason": {
+      "apprenticeship": [
+        "Train in placing, screeding, and finishing with timing logs.",
+        "Learn mix control, slump checks, and curing protection.",
+        "Support edging/jointing to spec; document linear feet.",
+        "Maintain tool clean-down standards.",
+        "Protect adjacent surfaces; capture no-face photos."
+      ],
+      "job": [
+        "Place/finish per timing and weather; log setup times.",
+        "Verify slopes/drains; record measurements.",
+        "Broom/trowel finishes to spec; document area.",
+        "Maintain curing application logs.",
+        "Cleanup and jointing checks."
+      ]
+    },
+    "Drywall Finisher": {
+      "apprenticeship": [
+        "Learn joint prep, taping, and compound mixes; log coats and dry times.",
+        "Sanding with dust control; record grit and PPE.",
+        "Patch/feather to tolerance; submit photos (no faces).",
+        "Tool maintenance logs.",
+        "Protect floors and adjacent finishes."
+      ],
+      "job": [
+        "Tape/mud/sand/sand sequence documented; area tracked.",
+        "Mix ratios recorded; equipment clean-down logs.",
+        "Surface inspection checklist completion.",
+        "Dust control verified.",
+        "Punch items resolved with notes."
+      ]
+    },
+    "Electrician – Inside (01)": {
+      "apprenticeship": [
+        "Learn prints, conduit bending, and terminations under supervision; log continuity tests.",
+        "Practice pull calculations, box fills, and device terminations with checklists.",
+        "Stage materials and maintain panel schedules.",
+        "Track torque settings used on lugs.",
+        "Maintain labeling and as-built notes."
+      ],
+      "job": [
+        "Pull, label, and terminate per print; continuity/insulation logs.",
+        "Bend EMT with documented angles; record rework counts.",
+        "Maintain panel and circuit directories.",
+        "PPE and LOTO awareness sheets maintained.",
+        "Housekeeping and egress maintained."
+      ]
+    },
+    "Electrician – Limited Energy (06)": {
+      "apprenticeship": [
+        "Learn low-voltage cabling, labeling, and device terminations; test logs.",
+        "Read simple risers and maintain as-built notes.",
+        "Rack/IDF staging, dressing, and labeling.",
+        "Firestop compliance recorded.",
+        "Tool control maintained."
+      ],
+      "job": [
+        "Pull/test LV cabling; certify with printout where applicable.",
+        "Terminate panels/devices; labeling verified.",
+        "Dress racks and maintain bend radius logs.",
+        "Document test results and revisions.",
+        "Housekeeping in IT spaces maintained."
+      ]
+    },
+    "Electrician – Residential (02)": {
+      "apprenticeship": [
+        "Learn rough-in/trim, device counts, and labeling.",
+        "Circuit mapping and directory updates.",
+        "GFCI/AFCI install checklist.",
+        "Lighting layout verification.",
+        "PPE and ladder safety logs."
+      ],
+      "job": [
+        "Rough/trim per plan; counts documented.",
+        "Test and label circuits with records.",
+        "Verify GFCI/AFCI function logs.",
+        "Fixture install logs.",
+        "Cleanup and protection maintained."
+      ]
+    },
+    "Elevator Constructor": {
+      "apprenticeship": [
+        "Learn hoistway safety, layout, and rail alignment; log tolerances.",
+        "Car assembly support with fastener torque logs.",
+        "Wiring to schematics with labeling.",
+        "Document inspections and sign-offs.",
+        "Maintain housekeeping in hoistway/control rooms."
+      ],
+      "job": [
+        "Assist rail installs; record plumb/level readings.",
+        "Track torque values and re-checks.",
+        "Stage parts; verify counts.",
+        "Label/control wiring with print tracking.",
+        "Safety checks and logs maintained."
+      ]
+    },
+    "Floor Layer": {
+      "apprenticeship": [
+        "Learn substrate prep, layout, and adhesives; dwell time logs.",
+        "Cut/fit to pattern; waste and yield tracking.",
+        "Rolling and seam checks recorded.",
+        "Protection/cleanup logs.",
+        "VOC and ventilation notes."
+      ],
+      "job": [
+        "Prep/lay to pattern; area and pattern notes.",
+        "Adhesive use tracked; MSDS notes.",
+        "Seams rolled/checked; logs kept.",
+        "Protection installed; photos (no faces).",
+        "Punch items resolved."
+      ]
+    },
+    "Glazier": {
+      "apprenticeship": [
+        "Learn measuring, setting, and sealing; shim logs.",
+        "Handling with suction devices; inspection logs.",
+        "Weatherseal application with cure notes.",
+        "Protection and cleanup maintained.",
+        "Hardware install counts recorded."
+      ],
+      "job": [
+        "Set panes to tolerance; document shims/packers.",
+        "Sealant beads logged (type/date).",
+        "Hardware alignment checks recorded.",
+        "Protect and clean framework; notes kept.",
+        "Punch items addressed."
+      ]
+    },
+    "Heat & Frost Insulator": {
+      "apprenticeship": [
+        "Learn measuring, cutting, and fitting insulation; record linear feet.",
+        "Vapor barrier installs with seam checks.",
+        "Hangers and supports verified.",
+        "Tool control and cleanup.",
+        "MSDS and PPE logs."
+      ],
+      "job": [
+        "Install per spec; linear feet tracked.",
+        "Vapor barrier taped/checked; log.",
+        "Supports verified; checklist.",
+        "Housekeeping maintained.",
+        "Punch items recorded."
+      ]
+    },
+    "Ironworker": {
+      "apprenticeship": [
+        "Learn bolt-up, hand signals, and fall protection checks; torque logs.",
+        "Layout from control lines; plumb/level readings noted.",
+        "Rigging inspection logs maintained.",
+        "Decking and shear stud prep.",
+        "Housekeeping and exclusion zones."
+      ],
+      "job": [
+        "Bolt/torque to spec; record values.",
+        "Verify plumb/level; log.",
+        "Maintain rigging inspections.",
+        "Decking counts and fastener logs.",
+        "Keep housekeeping to inspection standard."
+      ]
+    },
+    "Laborer": {
+      "apprenticeship": [
+        "Learn site cleanup, egress protection, and debris management logs.",
+        "Material handling with counts and routes logged.",
+        "Traffic control support with checklist.",
+        "Tool staging and inventory logs.",
+        "PPE and safety meetings documented."
+      ],
+      "job": [
+        "Maintain clear egress; daily checks.",
+        "Stage materials; count and track.",
+        "Assist crews with tool control.",
+        "Traffic/flagging per plan; note times.",
+        "Housekeeping standards met."
+      ]
+    },
+    "Operating Engineer": {
+      "apprenticeship": [
+        "Learn pre-start inspections and hand signals; logs kept.",
+        "Spotting, trench checks, and grade stakes.",
+        "Maintenance checks recorded.",
+        "Exclusion zone control.",
+        "Load charts awareness notes."
+      ],
+      "job": [
+        "Assist with inspections; sign-offs.",
+        "Spot equipment safely; signal logs.",
+        "Maintain housekeeping and barricades.",
+        "Track minor maintenance tasks.",
+        "Document site moves and checks."
+      ]
+    },
+    "Painter": {
+      "apprenticeship": [
+        "Learn surface prep and masking; tape/area logs.",
+        "Mix/apply coatings per spec; viscosity/time notes.",
+        "Dry times and mil thickness checks.",
+        "Cleanup and VOC notes.",
+        "Punch items documented."
+      ],
+      "job": [
+        "Prep/prime/finish per sequence; area tracked.",
+        "Product mix/use logged.",
+        "Thickness/dry time checks.",
+        "Cleanup and protection.",
+        "Corrections recorded."
+      ]
+    },
+    "Plasterer": {
+      "apprenticeship": [
+        "Learn lath, scratch/brown/finish sequencing; area/time logs.",
+        "Mix ratios and application checks.",
+        "Moisture/curing notes.",
+        "Tool maintenance.",
+        "Cleanup and protection."
+      ],
+      "job": [
+        "Apply coats per spec; area logged.",
+        "Mix/use recorded.",
+        "Cure/finish checks.",
+        "Cleanup maintained.",
+        "Punch list completed."
+      ]
+    },
+    "Plumber / Steamfitter / HVAC-R": {
+      "apprenticeship": [
+        "Learn pipe layout, cutting, and joining; pressure test logs.",
+        "Stage valves/fittings; track counts and tags.",
+        "Support brazing/welding prep; purge notes.",
+        "Read simple schematics; update as-builts.",
+        "Refrigerant and EPA 608 study logs (if applicable)."
+      ],
+      "job": [
+        "Install supports and pipe to spec; slope/pressure logs.",
+        "Set equipment per prints; anchor checks.",
+        "Insulation and labeling recorded.",
+        "Leak/pressure tests logged.",
+        "Cleanup and protection standards met."
+      ]
+    },
+    "Roofer": {
+      "apprenticeship": [
+        "Learn tear-off, deck prep, and underlayment; square footage logs.",
+        "Shingle/low-slope installs per pattern and fastener schedule.",
+        "Flashing and penetrations documented.",
+        "Fall protection and housekeeping logs.",
+        "Weather monitoring notes."
+      ],
+      "job": [
+        "Install per spec; area and fastener counts.",
+        "Flashing details recorded.",
+        "Cleanup and protection.",
+        "Safety checks maintained.",
+        "Punch items resolved."
+      ]
+    },
+    "Sheet Metal": {
+      "apprenticeship": [
+        "Learn takeoffs, duct fitting, and fastening; leak tests logged.",
+        "Sealant/tape application notes.",
+        "Hanger spacing checks recorded.",
+        "Labeling and airflow arrows.",
+        "Tool control and cleanup."
+      ],
+      "job": [
+        "Install duct/fittings per spec; pressure/leak logs.",
+        "Seal/insulate with recorded materials.",
+        "Hangers verified; checklist.",
+        "Label and document.",
+        "Housekeeping maintained."
+      ]
+    },
+    "Sprinkler Fitter": {
+      "apprenticeship": [
+        "Learn layout from plans; hanger spacing checks.",
+        "Threading/cutting with burr checks.",
+        "Hydrostatic test logs.",
+        "Device install counts.",
+        "Labeling and as-built notes."
+      ],
+      "job": [
+        "Install per plan; hanger/device counts.",
+        "Hydro test documentation.",
+        "Labeling completed.",
+        "Cleanup and protection.",
+        "Punch items tracked."
+      ]
+    },
+    "High Voltage – Outside Lineman": {
+      "apprenticeship": [
+        "Learn pole safety, climbing basics, and hand signals; practice logs.",
+        "Hardware/storm kits staging and checks.",
+        "Drop-zone control checklist.",
+        "Chainsaw maintenance logs (where applicable).",
+        "CDL/medical card preparation notes."
+      ],
+      "job": [
+        "Assist with setting hardware; count and verify.",
+        "Maintain exclusion zones and signal logs.",
+        "PPE checks and tailboards recorded.",
+        "Cleanup and staging.",
+        "Practice climbs documented."
+      ]
+    },
+    "Power Line Clearance Tree Trimmer": {
+      "apprenticeship": [
+        "Learn electrical hazard awareness basics and minimum approach distances; practice logs.",
+        "Rigging and hand-signal drills recorded.",
+        "Chainsaw inspection/maintenance logs.",
+        "Brush and debris management to plan.",
+        "Storm-readiness kit checks."
+      ],
+      "job": [
+        "Assist with cuts and lowers; control zone maintained.",
+        "Communicate using approved signals; logs.",
+        "Maintain tool inspections and chain records.",
+        "Cleanup and egress maintained.",
+        "Daily tailboard notes recorded."
+      ]
+    }
+  }
+}

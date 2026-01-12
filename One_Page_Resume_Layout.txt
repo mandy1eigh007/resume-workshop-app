@@ -1,0 +1,131 @@
+========================================
+ONE-PAGE RESUME LAYOUT
+Construction Trades Focus
+========================================
+
+HEADER SECTION
+----------------------------------------
+[NAME]
+[City, State] | [Phone] | [Email]
+
+
+OBJECTIVE
+----------------------------------------
+[One-line objective statement, neutral and evidence-ready.
+Chosen from objective starter bank or edited by student.
+Maximum 2 lines.]
+
+
+EXPERIENCE
+----------------------------------------
+[Company Name]                          [City, State]
+[Job Title]                             [Start Date – End Date]
+
+• [Measured bullet 1, ≤24 words with quantities/tools/outcomes]
+• [Measured bullet 2, ≤24 words with quantities/tools/outcomes]
+• [Measured bullet 3, ≤24 words with quantities/tools/outcomes]
+• [Optional bullet 4, ≤24 words with quantities/tools/outcomes]
+
+[Company Name]                          [City, State]
+[Job Title]                             [Start Date – End Date]
+
+• [Measured bullet 1, ≤24 words with quantities/tools/outcomes]
+• [Measured bullet 2, ≤24 words with quantities/tools/outcomes]
+• [Measured bullet 3, ≤24 words with quantities/tools/outcomes]
+• [Optional bullet 4, ≤24 words with quantities/tools/outcomes]
+
+[Company Name]                          [City, State]
+[Job Title]                             [Start Date – End Date]
+
+• [Measured bullet 1, ≤24 words with quantities/tools/outcomes]
+• [Measured bullet 2, ≤24 words with quantities/tools/outcomes]
+• [Measured bullet 3, ≤24 words with quantities/tools/outcomes]
+• [Optional bullet 4, ≤24 words with quantities/tools/outcomes]
+
+
+SKILLS
+----------------------------------------
+Transferable: [Skill 1] • [Skill 2] • [Skill 3] • [Skill 4]
+Job-Specific: [Skill 1] • [Skill 2] • [Skill 3] • [Skill 4]
+Self-Management: [Skill 1] • [Skill 2] • [Skill 3] • [Skill 4]
+
+[Maximum 12 total skills across all three categories]
+
+
+CERTIFICATIONS
+----------------------------------------
+• [Normalized Certification Name]
+• [Normalized Certification Name]
+• [Normalized Certification Name]
+
+
+EDUCATION
+----------------------------------------
+[School Name]
+[Credential] | [Year]
+[Optional details]
+
+[School Name]
+[Credential] | [Year]
+[Optional details]
+
+
+========================================
+FORMATTING GUIDELINES
+========================================
+
+Font: Arial, Calibri, or similar sans-serif, 10–11 pt
+Margins: 0.5"–1.0" all sides
+Length: One page maximum
+Spacing: Single or 1.15 line spacing
+Alignment: Left-aligned for body, name can be centered
+
+Headers: Bold, slightly larger (12 pt)
+Bullets: Use • symbol
+Dates: MM/YYYY format or "Present"
+
+========================================
+CONTENT RULES
+========================================
+
+Objective:
+- One line, neutral wording
+- No sub-trade labels
+- No union/non-union references
+
+Experience:
+- ≤3 jobs listed
+- 3–4 bullets per job
+- Each bullet ≤24 words
+- Include quantities, measurements, or tools
+
+Skills:
+- ≤12 total skills
+- Organized into 3 categories
+- Use skills from Skills Canon
+
+Certifications:
+- Use normalized names only
+- No expiration dates on resume (track separately)
+- List most relevant first
+
+Education:
+- ≤2 entries
+- Keep brief
+- Include credential type and year
+
+========================================
+WHAT TO AVOID
+========================================
+
+× Adjective-only bullets ("hard worker")
+× Invented employers or dates
+× Sub-trade labels in objectives
+× Union/non-union wording
+× More than 12 skills
+× More than 3 jobs
+× More than 1 page
+
+========================================
+END OF LAYOUT
+========================================
