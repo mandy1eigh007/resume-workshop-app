@@ -1,0 +1,63 @@
+DetectedRoleVariant,StandardizedRoleName,TradeRelevance
+Line Cook,Line Cook,Transferable (food service)
+Cook,Line Cook,Transferable (food service)
+Prep Cook,Line Cook,Transferable (food service)
+Server,Server,Transferable (customer service)
+Waiter,Server,Transferable (customer service)
+Waitress,Server,Transferable (customer service)
+Retail Associate,Retail Associate,Transferable (customer service)
+Sales Associate,Retail Associate,Transferable (customer service)
+Retail Clerk,Retail Associate,Transferable (customer service)
+Warehouse Associate,Warehouse Associate,Transferable (logistics)
+Warehouse Worker,Warehouse Associate,Transferable (logistics)
+Picker,Warehouse Associate,Transferable (logistics)
+Material Handler,Material Handler,Construction-adjacent
+Materials Handler,Material Handler,Construction-adjacent
+Material Mover,Material Handler,Construction-adjacent
+Traffic Control,Traffic Control / Flagger,Construction-adjacent
+Flagger,Traffic Control / Flagger,Construction-adjacent
+Flagging,Traffic Control / Flagger,Construction-adjacent
+Janitor,Janitor/Custodian,Transferable (maintenance)
+Custodian,Janitor/Custodian,Transferable (maintenance)
+Cleaner,Janitor/Custodian,Transferable (maintenance)
+Security Guard,Security Guard,Transferable (safety)
+Security Officer,Security Guard,Transferable (safety)
+Guard,Security Guard,Transferable (safety)
+Landscaper,Landscaper/Groundskeeper,Construction-adjacent
+Groundskeeper,Landscaper/Groundskeeper,Construction-adjacent
+Grounds Maintenance,Landscaper/Groundskeeper,Construction-adjacent
+Demolition Laborer,Demolition Laborer,Construction
+Demo Laborer,Demolition Laborer,Construction
+Demolition Worker,Demolition Laborer,Construction
+Carpenter Helper,Carpenter Helper,Construction
+Carpentry Helper,Carpenter Helper,Construction
+Apprentice Carpenter,Carpenter Helper,Construction
+Drywall Helper,Drywall/Lather Helper,Construction
+Lather Helper,Drywall/Lather Helper,Construction
+Drywall Hanger Helper,Drywall/Lather Helper,Construction
+Flooring Helper,Flooring Helper,Construction
+Floor Layer Helper,Flooring Helper,Construction
+Tile Helper,Flooring Helper,Construction
+Concrete Laborer,Concrete Laborer,Construction
+Cement Worker,Concrete Laborer,Construction
+Concrete Helper,Concrete Laborer,Construction
+HVAC Helper,HVAC Helper,Construction
+Heating Helper,HVAC Helper,Construction
+AC Helper,HVAC Helper,Construction
+Electrical Helper,Electrical Helper,Construction
+Electrician Helper,Electrical Helper,Construction
+Wireman Helper,Electrical Helper,Construction
+Plumbing Helper,Plumbing Helper,Construction
+Plumber Helper,Plumbing Helper,Construction
+Pipefitter Helper,Plumbing Helper,Construction
+Sheet Metal Helper,Sheet Metal Helper,Construction
+Duct Installer Helper,Sheet Metal Helper,Construction
+Tin Knocker Helper,Sheet Metal Helper,Construction
+Ironworker Helper,Ironworker Helper,Construction
+Iron Worker Helper,Ironworker Helper,Construction
+Structural Steel Helper,Ironworker Helper,Construction
+Roofer Helper,Roofer Helper,Construction
+Roofing Helper,Roofer Helper,Construction
+Laborer,Laborer,Construction
+Construction Laborer,Laborer,Construction
+General Laborer,Laborer,Construction

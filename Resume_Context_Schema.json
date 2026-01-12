@@ -1,0 +1,205 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Resume Context Schema",
+  "description": "Schema for construction-focused resume data structure",
+  "type": "object",
+  "properties": {
+    "header": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Full name"
+        },
+        "city": {
+          "type": "string",
+          "description": "City"
+        },
+        "state": {
+          "type": "string",
+          "description": "State abbreviation (e.g., WA)"
+        },
+        "phone": {
+          "type": "string",
+          "description": "Phone number"
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "description": "Email address"
+        }
+      },
+      "required": ["name", "city", "state", "phone", "email"]
+    },
+    "objective": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "string",
+          "description": "One-line objective statement, neutral and evidence-ready"
+        },
+        "trade": {
+          "type": "string",
+          "description": "Target trade"
+        },
+        "category": {
+          "type": "string",
+          "enum": ["Apprenticeship", "Job"],
+          "description": "Whether seeking apprenticeship or direct job entry"
+        }
+      },
+      "required": ["text"]
+    },
+    "experience": {
+      "type": "array",
+      "maxItems": 3,
+      "description": "Work experience entries (≤3)",
+      "items": {
+        "type": "object",
+        "properties": {
+          "company": {
+            "type": "string",
+            "description": "Company name"
+          },
+          "city": {
+            "type": "string",
+            "description": "City"
+          },
+          "state": {
+            "type": "string",
+            "description": "State abbreviation"
+          },
+          "startDate": {
+            "type": "string",
+            "description": "Start date (MM/YYYY)"
+          },
+          "endDate": {
+            "type": "string",
+            "description": "End date (MM/YYYY or 'Present')"
+          },
+          "title": {
+            "type": "string",
+            "description": "Job title"
+          },
+          "bullets": {
+            "type": "array",
+            "minItems": 3,
+            "maxItems": 4,
+            "description": "Measured duty bullets (3-4, ≤24 words each)",
+            "items": {
+              "type": "string",
+              "description": "Measured bullet with quantities, tools, or outcomes"
+            }
+          }
+        },
+        "required": ["company", "city", "state", "startDate", "endDate", "title", "bullets"]
+      }
+    },
+    "skills": {
+      "type": "object",
+      "properties": {
+        "transferable": {
+          "type": "array",
+          "description": "Transferable skills",
+          "items": {
+            "type": "string"
+          }
+        },
+        "jobSpecific": {
+          "type": "array",
+          "description": "Job-specific technical skills",
+          "items": {
+            "type": "string"
+          }
+        },
+        "selfManagement": {
+          "type": "array",
+          "description": "Self-management skills",
+          "items": {
+            "type": "string"
+          }
+        },
+        "total": {
+          "type": "integer",
+          "maximum": 12,
+          "description": "Total skills count (≤12)"
+        }
+      },
+      "required": ["transferable", "jobSpecific", "selfManagement"]
+    },
+    "certifications": {
+      "type": "array",
+      "description": "Normalized certifications (names only)",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Normalized certification name"
+          },
+          "date": {
+            "type": "string",
+            "description": "Completion or expiration date"
+          },
+          "notes": {
+            "type": "string",
+            "description": "Additional notes (e.g., 'expires YYYY-MM-DD')"
+          }
+        },
+        "required": ["name"]
+      }
+    },
+    "education": {
+      "type": "array",
+      "maxItems": 2,
+      "description": "Education entries (≤2)",
+      "items": {
+        "type": "object",
+        "properties": {
+          "school": {
+            "type": "string",
+            "description": "School name"
+          },
+          "credential": {
+            "type": "string",
+            "description": "Degree or credential (e.g., 'High School Diploma', 'GED')"
+          },
+          "year": {
+            "type": "string",
+            "description": "Graduation year"
+          },
+          "details": {
+            "type": "string",
+            "description": "Optional additional details"
+          }
+        },
+        "required": ["school", "credential", "year"]
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "description": "Additional tracking metadata",
+      "properties": {
+        "createdDate": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Resume creation timestamp"
+        },
+        "lastModified": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Last modification timestamp"
+        },
+        "version": {
+          "type": "string",
+          "description": "Resume version"
+        },
+        "targetTrade": {
+          "type": "string",
+          "description": "Primary target trade"
+        }
+      }
+    }
+  },
+  "required": ["header", "objective", "experience", "skills"]
+}
