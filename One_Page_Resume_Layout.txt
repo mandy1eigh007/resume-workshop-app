@@ -1,0 +1,30 @@
+ONE-PAGE RESUME LAYOUT
+
+**Header:**
+Name | City, State | Phone | Email
+
+**Objective:** (one line, neutral; chosen from starter bank; optionally edited by student)
+
+**Experience (≤3):**
+Company, City/State, Dates, Title
+• 3–4 measured bullets (≤24 words each)
+
+**Skills (≤12 total):**
+Transferable • Job-Specific • Self-Management
+
+**Certifications:**
+Normalized names only
+
+**Education (≤2):**
+School, Credential, Year, Details
+
+---
+
+CONSTRAINTS:
+- One page maximum
+- ≤12 total skills across all categories
+- 3–4 measured bullets per job (≤24 words each)
+- Normalized certification names only
+- Neutral wording throughout
+- No union/non-union references
+- No sub-trade labels in objectives

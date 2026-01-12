@@ -1,0 +1,98 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Resume Context Schema",
+  "description": "Schema for one-page construction resume with evidence-driven content",
+  "type": "object",
+  "properties": {
+    "header": {
+      "type": "object",
+      "properties": {
+        "name": {"type": "string"},
+        "city": {"type": "string"},
+        "state": {"type": "string"},
+        "phone": {"type": "string"},
+        "email": {"type": "string", "format": "email"}
+      },
+      "required": ["name", "city", "state", "phone", "email"]
+    },
+    "objective": {
+      "type": "object",
+      "properties": {
+        "text": {"type": "string", "maxLength": 200},
+        "trade": {"type": "string"},
+        "type": {"type": "string", "enum": ["Apprenticeship", "Job"]}
+      },
+      "required": ["text"]
+    },
+    "experience": {
+      "type": "array",
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "properties": {
+          "company": {"type": "string"},
+          "city": {"type": "string"},
+          "state": {"type": "string"},
+          "dates": {"type": "string"},
+          "title": {"type": "string"},
+          "bullets": {
+            "type": "array",
+            "minItems": 3,
+            "maxItems": 4,
+            "items": {
+              "type": "string",
+              "maxLength": 150
+            }
+          }
+        },
+        "required": ["company", "city", "state", "dates", "title", "bullets"]
+      }
+    },
+    "skills": {
+      "type": "object",
+      "properties": {
+        "transferable": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "job_specific": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "self_management": {
+          "type": "array",
+          "items": {"type": "string"}
+        }
+      },
+      "additionalProperties": false
+    },
+    "certifications": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {"type": "string"},
+          "date": {"type": "string"},
+          "expiry": {"type": "string"}
+        },
+        "required": ["name"]
+      }
+    },
+    "education": {
+      "type": "array",
+      "maxItems": 2,
+      "items": {
+        "type": "object",
+        "properties": {
+          "school": {"type": "string"},
+          "credential": {"type": "string"},
+          "year": {"type": "string"},
+          "details": {"type": "string"}
+        },
+        "required": ["school", "credential"]
+      }
+    }
+  },
+  "required": ["header", "objective", "experience", "skills"],
+  "additionalProperties": false
+}

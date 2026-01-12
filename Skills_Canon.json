@@ -1,0 +1,42 @@
+{
+  "Transferable": [
+    "Problem Solving",
+    "Critical Thinking",
+    "Time Management",
+    "Attention to Detail",
+    "Team Collaboration",
+    "Communication Under Pressure",
+    "Reliability & Punctuality",
+    "Safety Mindset",
+    "Accountability",
+    "Adaptability",
+    "Documentation & Recordkeeping",
+    "Customer Interaction"
+  ],
+  "Job-Specific": [
+    "Reading Blueprints & Specs",
+    "Hand & Power Tools",
+    "Materials Handling (wood/concrete/metal)",
+    "Fastening & Torque",
+    "Measuring & Layout",
+    "Rigging Signals (awareness/practice)",
+    "Ladder & Fall Protection Basics",
+    "Temporary Protection & Housekeeping",
+    "Equipment Spotting",
+    "Prints/Nameplate Read-Throughs",
+    "Basic Math (fractions, decimals, ratios)",
+    "Lockout/Tagout Awareness",
+    "QA/QC Checklists"
+  ],
+  "Self-Management": [
+    "Initiative",
+    "Willingness to Learn",
+    "Physical Stamina",
+    "Focus",
+    "Professional Conduct",
+    "Care for Tools/Work Area",
+    "Following Directions",
+    "Maintaining Pace & Quality",
+    "Stress Tolerance"
+  ]
+}
