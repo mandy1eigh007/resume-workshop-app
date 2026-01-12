@@ -1,0 +1,26 @@
+Boilermaker
+Bricklayer / BAC Allied (Brick/Tile/Terrazzo/Marble/PCC)
+Carpenter (General)
+Carpenter – Interior Systems
+Millwright
+Pile Driver
+Cement Mason
+Drywall Finisher
+Electrician – Inside (01)
+Electrician – Limited Energy (06)
+Electrician – Residential (02)
+Elevator Constructor
+Floor Layer
+Glazier
+Heat & Frost Insulator
+Ironworker
+Laborer
+Operating Engineer
+Painter
+Plasterer
+Plumber / Steamfitter / HVAC-R
+Roofer
+Sheet Metal
+Sprinkler Fitter
+High Voltage – Outside Lineman
+Power Line Clearance Tree Trimmer
