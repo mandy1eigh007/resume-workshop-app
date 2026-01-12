@@ -86,7 +86,7 @@ class ContentMasterService {
       // Stop at next major section
       if (line.startsWith('## B)')) break;
       
-      // Detect trade header (### TradeNme)
+      // Detect trade header (### TradeName)
       if (line.startsWith('###') && !line.contains('**')) {
         // Save previous trade if exists
         if (currentTrade != null) {
@@ -211,7 +211,7 @@ class ContentMasterService {
     
     if (startIndex == -1) return SkillsCanon.empty();
     
-    for (int i = startIndex; i < lines.length && i < startIndex + 20; i++) {
+    for (int i = startIndex; i < lines.length; i++) {
       final line = lines[i].trim();
       
       // Stop at next major section
@@ -273,7 +273,7 @@ class ContentMasterService {
     
     if (startIndex == -1) return certifications;
     
-    for (int i = startIndex; i < lines.length && i < startIndex + 15; i++) {
+    for (int i = startIndex; i < lines.length; i++) {
       final line = lines[i].trim();
       
       // Stop at next major section
